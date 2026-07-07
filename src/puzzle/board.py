@@ -25,7 +25,7 @@ def rc_to_index(r: int, c: int) -> int:
 
 def get_blank_idx(board: tuple[int, ...]) -> int:
     """
-    Get the flat index of the blank (0) tile in the given board.
+    Get the index of the blank(0) tile in the given board.
     """
 
     return board.index(0)
