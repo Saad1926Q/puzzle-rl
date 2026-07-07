@@ -1,10 +1,9 @@
-from typing import List, Tuple
-
 GOAL = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0)
 WIDTH = 4
+MOVE_DELTA = {"up": (1, 0), "down": (-1, 0), "left": (0, 1), "right": (0, -1)}
 
 
-def index_to_rc(idx: int) -> Tuple[int, int]:
+def index_to_rc(idx: int) -> tuple[int, int]:
     """
     Convert index of flat board to (row,col) for 4 x 4 grid.
     """
@@ -24,7 +23,7 @@ def rc_to_index(r: int, c: int) -> int:
     return r * WIDTH + c
 
 
-def get_blank_idx(board: Tuple[int, ...]) -> int:
+def get_blank_idx(board: tuple[int, ...]) -> int:
     """
     Get the flat index of the blank (0) tile in the given board.
     """
@@ -32,7 +31,7 @@ def get_blank_idx(board: Tuple[int, ...]) -> int:
     return board.index(0)
 
 
-def get_goal_rc(tile_value: int) -> Tuple[int, int]:
+def get_goal_rc(tile_value: int) -> tuple[int, int]:
     """
     Get the (row,col) that the given tile value belongs at in GOAL.
     """
@@ -42,7 +41,7 @@ def get_goal_rc(tile_value: int) -> Tuple[int, int]:
     return index_to_rc(idx)
 
 
-def legal_moves(board: Tuple[int, ...]) -> List[str]:
+def legal_moves(board: tuple[int, ...]) -> list[str]:
     """
     Get the list of currently legal move commands for the given board.
 
@@ -75,3 +74,38 @@ def legal_moves(board: Tuple[int, ...]) -> List[str]:
         moves.append("right")
 
     return moves
+
+
+def apply_move(board: tuple[int, ...], move: str) -> tuple[int, ...]:
+    """
+    Apply a move to the board and return the resulting board.
+
+    Assumes a legal move is passed, hence no validation.
+    """
+
+    new_board = list(board)
+
+    blank_idx = get_blank_idx(board)
+
+    blank_r, blank_c = index_to_rc(blank_idx)
+
+    dr, dc = MOVE_DELTA[move]
+
+    target_r, target_c = blank_r + dr, blank_c + dc
+
+    target_idx = rc_to_index(target_r, target_c)
+
+    new_board[blank_idx], new_board[target_idx] = (
+        new_board[target_idx],
+        new_board[blank_idx],
+    )
+
+    return tuple(new_board)
+
+
+def is_solved(board: tuple[int, ...]) -> bool:
+    """
+    Check whether the board is in the solved state.
+    """
+
+    return board == GOAL
