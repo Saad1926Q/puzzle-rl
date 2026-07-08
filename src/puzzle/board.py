@@ -23,6 +23,38 @@ def rc_to_index(r: int, c: int) -> int:
     return r * WIDTH + c
 
 
+def _build_goal_pos() -> dict[int, tuple[int, int]]:
+    return {tile: index_to_rc(idx) for idx, tile in enumerate(GOAL)}
+
+
+def _build_legal_move_table() -> tuple[tuple[str, ...], ...]:
+    table = []
+
+    for blank_idx in range(len(GOAL)):
+        blank_r, blank_c = index_to_rc(blank_idx)
+        moves = []
+
+        if blank_r < WIDTH - 1:
+            moves.append("up")
+
+        if blank_r > 0:
+            moves.append("down")
+
+        if blank_c < WIDTH - 1:
+            moves.append("left")
+
+        if blank_c > 0:
+            moves.append("right")
+
+        table.append(tuple(moves))
+
+    return tuple(table)
+
+
+GOAL_POS = _build_goal_pos()
+LEGAL_MOVE_TABLE = _build_legal_move_table()
+
+
 def get_blank_idx(board: tuple[int, ...]) -> int:
     """
     Get the index of the blank(0) tile in the given board.
@@ -36,9 +68,7 @@ def get_goal_rc(tile_value: int) -> tuple[int, int]:
     Get the (row,col) that the given tile value belongs at in GOAL.
     """
 
-    idx = GOAL.index(tile_value)
-
-    return index_to_rc(idx)
+    return GOAL_POS[tile_value]
 
 
 def legal_moves(board: tuple[int, ...]) -> list[str]:
@@ -57,23 +87,7 @@ def legal_moves(board: tuple[int, ...]) -> list[str]:
 
     blank_idx = get_blank_idx(board)
 
-    blank_r, blank_c = index_to_rc(blank_idx)
-
-    moves = []
-
-    if blank_r < 3:
-        moves.append("up")
-
-    if blank_r > 0:
-        moves.append("down")
-
-    if blank_c < 3:
-        moves.append("left")
-
-    if blank_c > 0:
-        moves.append("right")
-
-    return moves
+    return list(LEGAL_MOVE_TABLE[blank_idx])
 
 
 def apply_move(board: tuple[int, ...], move: str) -> tuple[int, ...]:
