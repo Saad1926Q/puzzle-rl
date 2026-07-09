@@ -1929,6 +1929,8 @@ name = "smth-rl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "openai" },
+    { name = "tqdm" },
     { name = "verifiers" },
 ]
 
@@ -1938,7 +1940,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "verifiers", specifier = ">=0.1.14" }]
+requires-dist = [
+    { name = "openai", specifier = ">=2.44.0" },
+    { name = "tqdm", specifier = ">=4.68.3" },
+    { name = "verifiers", specifier = ">=0.1.14" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

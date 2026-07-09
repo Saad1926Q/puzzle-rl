@@ -23,11 +23,34 @@ def rc_to_index(r: int, c: int) -> int:
     return r * WIDTH + c
 
 
+def _get_opposite(move: str):
+    """
+    Return the move that immediately undoes the given move.
+    """
+
+    if move == "up":
+        return "down"
+    elif move == "down":
+        return "up"
+    elif move == "left":
+        return "right"
+    else:
+        return "left"
+
+
 def _build_goal_pos() -> dict[int, tuple[int, int]]:
+    """
+    Build a lookup from tile value to its goal (row,col) position.
+    """
+
     return {tile: index_to_rc(idx) for idx, tile in enumerate(GOAL)}
 
 
 def _build_legal_move_table() -> tuple[tuple[str, ...], ...]:
+    """
+    Precompute legal move names for each possible blank position.
+    """
+
     table = []
 
     for blank_idx in range(len(GOAL)):
@@ -88,6 +111,19 @@ def legal_moves(board: tuple[int, ...]) -> list[str]:
     blank_idx = get_blank_idx(board)
 
     return list(LEGAL_MOVE_TABLE[blank_idx])
+
+
+def get_non_reversing_moves(board: tuple[int, ...], last_move: str | None) -> list[str]:
+    """
+    Get legal moves while excluding the move that would immediately reverse last_move.
+    """
+
+    moves = legal_moves(board)
+
+    if last_move is None:
+        return moves
+
+    return [move for move in moves if move != _get_opposite(last_move)]
 
 
 def apply_move(board: tuple[int, ...], move: str) -> tuple[int, ...]:

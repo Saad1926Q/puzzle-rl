@@ -1,6 +1,6 @@
 import random
 
-from puzzle.board import GOAL, apply_move, legal_moves
+from puzzle.board import GOAL, apply_move, get_non_reversing_moves
 
 
 def scramble_board(depth: int, rng: random.Random) -> tuple[int, ...]:
@@ -10,10 +10,14 @@ def scramble_board(depth: int, rng: random.Random) -> tuple[int, ...]:
 
     board = GOAL
 
+    last_move = None
+
     for _ in range(depth):
-        moves = legal_moves(board)
+        moves = get_non_reversing_moves(board, last_move)
 
         move = rng.choice(moves)
+
+        last_move = move
 
         board = apply_move(board, move)
 

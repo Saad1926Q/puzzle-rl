@@ -1,21 +1,14 @@
-from puzzle.board import apply_move, is_solved, legal_moves
+from puzzle.board import _get_opposite, apply_move, is_solved, legal_moves
 from puzzle.heuristics import manhattan_linear_conflict
-
-
-def _get_opposite(move: str):
-    if move == "up":
-        return "down"
-    elif move == "down":
-        return "up"
-    elif move == "left":
-        return "right"
-    else:
-        return "left"
 
 
 def _search(
     board: tuple[int, ...], path: list[str], g: int, threshold: int | float, last_move
 ) -> tuple[bool, float]:
+    """
+    Run one depth-first IDA* search iteration up to the current threshold.
+    """
+
     h = manhattan_linear_conflict(board)
 
     f = g + h
@@ -49,6 +42,10 @@ def _search(
 
 
 def solve(board: tuple[int, ...]) -> list[str]:
+    """
+    Solve the puzzle with IDA* and return the sequence of move commands.
+    """
+
     threshold = manhattan_linear_conflict(board)
 
     path = []
