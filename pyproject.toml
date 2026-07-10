@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "openai>=2.44.0",
     "tqdm>=4.68.3",
+    "transformers>=5.13.0",
     "verifiers>=0.1.14",
 ]
 
@@ -21,3 +22,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/puzzle"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true

@@ -3,3 +3,4 @@ __pycache__
 .pytest_cache
 *.jsonl
 .env
+data/run_sft_1000.sh
