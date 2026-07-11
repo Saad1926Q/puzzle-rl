@@ -2,5 +2,6 @@
 __pycache__
 .pytest_cache
 *.jsonl
+*.parquet
 .env
 data/run_sft_1000.sh

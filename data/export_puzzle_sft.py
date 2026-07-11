@@ -123,7 +123,7 @@ def export_record(record: dict[str, Any]) -> dict[str, Any]:
         "optimal_moves": record["optimal_moves"],
         "optimal_length": record["optimal_length"],
         "move_count": len(record["optimal_moves"]),
-        "split": record.get("split", "train"),
+        "split": "sft",
     }
 
 
