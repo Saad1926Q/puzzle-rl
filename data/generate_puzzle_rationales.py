@@ -7,7 +7,14 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tqdm import tqdm
 
-from puzzle.board import apply_move, legal_moves
+from puzzle.board import (
+    MOVE_DELTA,
+    apply_move,
+    get_blank_idx,
+    index_to_rc,
+    legal_moves,
+    rc_to_index,
+)
 from puzzle.render import render
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -34,6 +41,19 @@ def read_jsonl(input_path: str) -> list[dict[str, Any]]:
     return records
 
 
+def get_moved_tile(board: tuple[int, ...], move: str) -> int:
+    """
+    Return the numbered tile that moves into the blank for this move command.
+    """
+
+    blank_idx = get_blank_idx(board)
+    blank_r, blank_c = index_to_rc(blank_idx)
+    dr, dc = MOVE_DELTA[move]
+    tile_idx = rc_to_index(blank_r + dr, blank_c + dc)
+
+    return board[tile_idx]
+
+
 def build_solution_steps(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Replay the known optimal move sequence and capture per-step board states.
@@ -49,12 +69,14 @@ def build_solution_steps(candidate: dict[str, Any]) -> list[dict[str, Any]]:
                 f"{candidate.get('id', '<unknown>')}"
             )
 
+        moved_tile = get_moved_tile(current_board, move)
         next_board = apply_move(current_board, move)
         steps.append(
             {
                 "step_index": step_index,
                 "board_before": list(current_board),
                 "move": move,
+                "moved_tile": moved_tile,
                 "board_after": list(next_board),
             }
         )
@@ -72,11 +94,32 @@ def build_rationale_prompt(step: dict[str, Any]) -> list[dict[str, str]]:
         {
             "role": "system",
             "content": (
-                "You are a strong 15-puzzle solver. "
-                "Write concise, natural move rationales. "
-                "Do not include XML tags, bullet points, or extra formatting. "
-                "Do not mention alternative moves. "
-                "Return only the short rationale text."
+                "You are writing one short training rationale for a 15-puzzle move.\n\n"
+                "Important move convention:\n"
+                "Move names describe the numbered tile moving into the blank, not the "
+                "blank moving. For example, if the row is \"13 _ 14 15\", then move "
+                "\"left\" means tile 14 moves left into the blank, producing "
+                "\"13 14 _ 15\".\n\n"
+                "Rules:\n"
+                "- The chosen move is already known to be legal and optimal.\n"
+                "- Explain why moving the numbered tile is useful.\n"
+                "- Mention the moved tile number.\n"
+                "- Do not say the blank, empty space, or empty tile moves.\n"
+                "- Do not criticize the move or compare alternatives.\n"
+                "- Do not include XML tags, bullet points, or extra formatting.\n"
+                "- Return exactly one short sentence.\n\n"
+                "Example 1:\n"
+                "Chosen move: left\n"
+                "Moved tile: 14\n"
+                "Good rationale: Move tile 14 left into the blank to place it closer "
+                "to its solved position.\n"
+                "Bad rationale: Move the blank left to let tile 14 shift over.\n\n"
+                "Example 2:\n"
+                "Chosen move: up\n"
+                "Moved tile: 7\n"
+                "Good rationale: Move tile 7 up into the blank to restore order in "
+                "that column.\n"
+                "Bad rationale: Move the empty space up to bring tile 7 into position."
             ),
         },
         {
@@ -85,9 +128,9 @@ def build_rationale_prompt(step: dict[str, Any]) -> list[dict[str, str]]:
                 "You are solving this 15-puzzle position.\n\n"
                 f"Current board:\n{render(tuple(step['board_before']))}\n\n"
                 f"Chosen move: {step['move']}\n"
+                f"Moved tile: {step['moved_tile']}\n"
                 f"Board after the move:\n{render(tuple(step['board_after']))}\n\n"
-                "Write the thought process behind making that move concisely, "
-                "as a short player-style rationale."
+                "Write the rationale."
             ),
         },
     ]
