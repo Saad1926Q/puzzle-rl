@@ -1,5 +1,5 @@
 from puzzle.board import _get_opposite, apply_move, is_solved, legal_moves
-from puzzle.heuristics import manhattan_linear_conflict
+from puzzle.heuristics import manhattan
 
 
 def _search(
@@ -9,7 +9,7 @@ def _search(
     Run one depth-first IDA* search iteration up to the current threshold.
     """
 
-    h = manhattan_linear_conflict(board)
+    h = manhattan(board)
 
     f = g + h
 
@@ -43,10 +43,13 @@ def _search(
 
 def solve(board: tuple[int, ...]) -> list[str]:
     """
-    Solve the puzzle with IDA* and return the sequence of move commands.
+    Solve a board optimally using IDA*.
+
+    The board is assumed to be solvable. Dataset boards are produced by
+    scrambling the goal state, so solvability is guaranteed by construction.
     """
 
-    threshold = manhattan_linear_conflict(board)
+    threshold = manhattan(board)
 
     path = []
 
