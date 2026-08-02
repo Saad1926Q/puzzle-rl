@@ -1,16 +1,21 @@
 [project]
 name = "smth-rl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Fifteen Puzzle RL"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "accelerate>=1.14.0",
     "datasets>=4.6.1",
     "openai>=2.44.0",
+    "openenv==0.4.1",
+    "peft>=0.15.0",
+    "pyyaml>=6.0",
+    "torch==2.11.0",
     "tqdm>=4.68.3",
-    "transformers>=5.13.0",
-    "verifiers>=0.1.14",
+    "transformers==5.13.0",
+    "trl==1.8.0",
+    "vllm==0.23.0",
     "wandb>=0.28.0",
 ]
 
@@ -24,7 +29,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/puzzle"]
+packages = ["src/puzzle", "src/env", "src/rl"]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

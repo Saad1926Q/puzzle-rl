@@ -5,3 +5,4 @@ __pycache__
 *.parquet
 .env
 data/run_sft_1000.sh
+.testdeps
