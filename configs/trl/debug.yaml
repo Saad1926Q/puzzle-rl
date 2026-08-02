@@ -28,8 +28,8 @@ trl:
   vllm_gpu_memory_utilization: 0.22
   vllm_max_model_length: 4096
   logging_steps: 1
-  save_strategy: steps
-  save_steps: 1
+  save_strategy: "no"
+  save_steps: 10
   report_to: ["wandb"]
   run_name: fifteen-puzzle-trl-debug
   seed: 0
