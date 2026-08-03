@@ -27,6 +27,7 @@ trl:
   vllm_mode: colocate
   vllm_gpu_memory_utilization: 0.22
   vllm_max_model_length: 4096
+  vllm_importance_sampling_correction: false
   logging_steps: 1
   save_strategy: steps
   save_steps: 10
