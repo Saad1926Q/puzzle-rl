@@ -159,11 +159,27 @@ def make_grpo_config(trl_kwargs: dict[str, Any]) -> GRPOConfig:
     return GRPOConfig(**trl_kwargs)
 
 
+def push_model_to_hub(final_dir: str, repo_id: str, path_in_repo: str = ".", private: bool = False) -> None:
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.create_repo(repo_id=repo_id, repo_type="model", private=private, exist_ok=True)
+    api.upload_folder(
+        repo_id=repo_id,
+        repo_type="model",
+        folder_path=final_dir,
+        path_in_repo=path_in_repo,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", help="path to a configs/trl/*.yaml file")
     parser.add_argument("--output-dir", default=None, help="override trl.output_dir")
     parser.add_argument("--resume", default=None, help="resume from a TRL checkpoint dir")
+    parser.add_argument("--push-to-hub", default=None, metavar="REPO_ID", help="upload final weights to this HF repo")
+    parser.add_argument("--hub-path", default=".", help="path inside the HF repo")
+    parser.add_argument("--hub-private", action="store_true", help="create the HF repo as private")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -207,7 +223,15 @@ def main() -> None:
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     if grpo_config.output_dir:
-        trainer.save_model(os.path.join(grpo_config.output_dir, "final"))
+        final_dir = os.path.join(grpo_config.output_dir, "final")
+        trainer.save_model(final_dir)
+    else:
+        final_dir = None
+
+    if args.push_to_hub is not None:
+        if final_dir is None:
+            raise ValueError("--push-to-hub requires trl.output_dir or --output-dir")
+        push_model_to_hub(final_dir, args.push_to_hub, args.hub_path, args.hub_private)
 
 
 if __name__ == "__main__":
