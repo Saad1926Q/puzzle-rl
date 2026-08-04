@@ -14,10 +14,13 @@ from tqdm import tqdm
 from env.protocol import build_system_prompt
 from env.session import FifteenPuzzleSession
 
+EVAL_DATASET_NAME = "saad1926q/15-puzzle"
+EVAL_DATASET_SUBSET = "eval"
+EVAL_DATASET_SPLIT = "eval"
+
 
 @dataclass
 class EvalConfig:
-    input_path: str
     output_path: str
     model: str
     max_turns: int = 120
@@ -32,14 +35,15 @@ class EvalConfig:
     wandb_run_name: str | None = None
 
 
-def read_jsonl(path: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-    return records
+def load_eval_rows() -> list[dict[str, Any]]:
+    from datasets import load_dataset
+
+    dataset = load_dataset(
+        EVAL_DATASET_NAME,
+        EVAL_DATASET_SUBSET,
+        split=EVAL_DATASET_SPLIT,
+    )
+    return [dict(row) for row in dataset]
 
 
 def write_jsonl_record(path: str, record: dict[str, Any]) -> None:
@@ -238,7 +242,9 @@ def log_summary_to_wandb(summary: dict[str, Any], config: EvalConfig) -> None:
         job_type="eval",
         config={
             "model": config.model,
-            "input": config.input_path,
+            "dataset": EVAL_DATASET_NAME,
+            "dataset_subset": EVAL_DATASET_SUBSET,
+            "dataset_split": EVAL_DATASET_SPLIT,
             "max_turns": config.max_turns,
             "num_generations": config.num_generations,
             "keep_history": config.keep_history,
@@ -259,13 +265,11 @@ def log_summary_to_wandb(summary: dict[str, Any], config: EvalConfig) -> None:
 
 
 def run_eval(config: EvalConfig) -> dict[str, Any]:
-    if not os.path.exists(config.input_path):
-        raise ValueError(f"input file does not exist: {config.input_path}")
     if config.max_turns <= 0:
         raise ValueError("max_turns must be positive")
     if config.num_generations <= 0:
         raise ValueError("num_generations must be positive")
-    candidates = read_jsonl(config.input_path)
+    candidates = load_eval_rows()
     tokenizer, model = load_hf_model(config.model)
 
     os.makedirs(os.path.dirname(config.output_path) or ".", exist_ok=True)
@@ -304,7 +308,6 @@ def run_eval(config: EvalConfig) -> dict[str, Any]:
 
 def parse_args() -> EvalConfig:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", dest="input_path", required=True)
     parser.add_argument("--output", dest="output_path", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--max-turns", type=int, default=120)
