@@ -1,0 +1,198 @@
+"""Authoritative 8-puzzle rollout and reward evaluation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable
+
+from evaluation.constants import (
+    DEFAULT_MAX_TURNS,
+    ILLEGAL_OR_MALFORMED_REWARD,
+    MAX_TURNS,
+    SOLVED_BASE_REWARD,
+    SOLVED_EFFICIENCY_WEIGHT,
+    TIMEOUT_REWARD,
+)
+from evaluation.dataset import PuzzleExample
+from evaluation.model import MoveAgent, parse_move
+from puzzle3.board import apply_move, is_solved, legal_moves
+
+
+@dataclass
+class StepResult:
+    turn: int
+    board: tuple[int, ...]
+    legal_moves: tuple[str, ...]
+    raw_response: str | None
+    move: str | None
+    next_board: tuple[int, ...] | None
+    status: str
+    response_metadata: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "turn": self.turn,
+            "board": list(self.board),
+            "legal_moves": list(self.legal_moves),
+            "raw_response": self.raw_response,
+            "move": self.move,
+            "next_board": list(self.next_board) if self.next_board is not None else None,
+            "status": self.status,
+            "response_metadata": self.response_metadata,
+        }
+
+
+@dataclass
+class EpisodeResult:
+    example: PuzzleExample
+    outcome: str
+    reward: float
+    moves_taken: int
+    final_board: tuple[int, ...]
+    steps: list[StepResult]
+
+    @property
+    def solved(self) -> bool:
+        return self.outcome == "solved"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.example.example_id,
+            "initial_board": list(self.example.board),
+            "optimal_length": self.example.optimal_length,
+            "outcome": self.outcome,
+            "reward": self.reward,
+            "moves_taken": self.moves_taken,
+            "final_board": list(self.final_board),
+            "steps": [step.to_dict() for step in self.steps],
+        }
+
+
+@dataclass
+class EvaluationResult:
+    episodes: list[EpisodeResult]
+
+    def summary(self) -> dict[str, Any]:
+        count = len(self.episodes)
+        outcomes = {outcome: sum(e.outcome == outcome for e in self.episodes) for outcome in (
+            "solved", "illegal", "malformed", "truncated", "timeout"
+        )}
+        solved = [episode for episode in self.episodes if episode.solved]
+        return {
+            "num_examples": count,
+            "solved": outcomes["solved"],
+            "illegal": outcomes["illegal"],
+            "malformed": outcomes["malformed"],
+            "truncated": outcomes["truncated"],
+            "timeout": outcomes["timeout"],
+            "solved_rate": outcomes["solved"] / count if count else 0.0,
+            "illegal_rate": outcomes["illegal"] / count if count else 0.0,
+            "malformed_rate": outcomes["malformed"] / count if count else 0.0,
+            "truncated_rate": outcomes["truncated"] / count if count else 0.0,
+            "timeout_rate": outcomes["timeout"] / count if count else 0.0,
+            "mean_reward": sum(e.reward for e in self.episodes) / count if count else 0.0,
+            "mean_moves_taken": sum(e.moves_taken for e in self.episodes) / count if count else 0.0,
+            "mean_solved_moves": (
+                sum(e.moves_taken for e in solved) / len(solved) if solved else 0.0
+            ),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"summary": self.summary(), "episodes": [e.to_dict() for e in self.episodes]}
+
+
+def solved_reward(optimal_length: int, moves_taken: int) -> float:
+    """Return the exact requested solved-trajectory reward."""
+
+    if moves_taken <= 0:
+        return 1.0
+    efficiency = min(optimal_length / moves_taken, 1.0)
+    return SOLVED_BASE_REWARD + SOLVED_EFFICIENCY_WEIGHT * efficiency
+
+
+def evaluate_episode(
+    example: PuzzleExample,
+    agent: MoveAgent,
+    *,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> EpisodeResult:
+    """Run one puzzle with environment-authoritative state and scoring."""
+
+    if max_turns <= 0 or max_turns > MAX_TURNS:
+        raise ValueError(f"max_turns must be between 1 and {MAX_TURNS}")
+
+    board = example.board
+    steps: list[StepResult] = []
+    if is_solved(board):
+        return EpisodeResult(example, "solved", 1.0, 0, board, steps)
+
+    for turn in range(1, max_turns + 1):
+        available = tuple(legal_moves(board))
+        raw_response = agent.next_move(board)
+        response_metadata = getattr(agent, "last_response_metadata", None)
+        move = parse_move(raw_response)
+        if move is None:
+            outcome = (
+                "truncated"
+                if response_metadata and response_metadata.get("truncated")
+                else "malformed"
+            )
+            steps.append(
+                StepResult(
+                    turn, board, available, raw_response, None, None, outcome,
+                    response_metadata,
+                )
+            )
+            return EpisodeResult(
+                example, outcome, ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps
+            )
+        if move not in available:
+            steps.append(
+                StepResult(
+                    turn, board, available, raw_response, move, None, "illegal",
+                    response_metadata,
+                )
+            )
+            return EpisodeResult(
+                example, "illegal", ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps
+            )
+
+        next_board = apply_move(board, move)
+        solved = is_solved(next_board)
+        steps.append(
+            StepResult(
+                turn,
+                board,
+                available,
+                raw_response,
+                move,
+                next_board,
+                "solved" if solved else "valid",
+                response_metadata,
+            )
+        )
+        board = next_board
+        if solved:
+            return EpisodeResult(
+                example,
+                "solved",
+                solved_reward(example.optimal_length, turn),
+                turn,
+                board,
+                steps,
+            )
+
+    return EpisodeResult(example, "timeout", TIMEOUT_REWARD, max_turns, board, steps)
+
+
+def evaluate(
+    examples: Iterable[PuzzleExample],
+    agent: MoveAgent,
+    *,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> EvaluationResult:
+    """Evaluate each example independently using the same stateless-request agent."""
+
+    return EvaluationResult(
+        [evaluate_episode(example, agent, max_turns=max_turns) for example in examples]
+    )
