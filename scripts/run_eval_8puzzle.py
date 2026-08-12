@@ -37,6 +37,13 @@ def bounded_max_turns(value: str) -> int:
     return turns
 
 
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
@@ -49,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Evaluate only this many rows; default is the entire eval split",
     )
     parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument(
+        "--num-rollouts",
+        type=positive_int,
+        default=1,
+        help="Independent rollouts per puzzle (default: 1)",
+    )
     parser.add_argument("--max-turns", type=bounded_max_turns, default=DEFAULT_MAX_TURNS)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
@@ -92,6 +105,7 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "config": args.config,
         "split": args.split,
         "num_examples": actual_num_examples,
+        "num_rollouts": args.num_rollouts,
         "offset": args.offset,
         "max_turns": args.max_turns,
         "model": args.model,
@@ -123,7 +137,12 @@ def main() -> None:
         max_tokens=args.max_tokens,
     )
 
-    result: EvaluationResult = evaluate(examples, agent, max_turns=args.max_turns)
+    result: EvaluationResult = evaluate(
+        examples,
+        agent,
+        max_turns=args.max_turns,
+        num_rollouts=args.num_rollouts,
+    )
     run_metadata = metadata(args, len(examples))
     summary_output = {"metadata": run_metadata, "summary": result.summary()}
 

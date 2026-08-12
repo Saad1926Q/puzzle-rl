@@ -50,6 +50,7 @@ class EpisodeResult:
     moves_taken: int
     final_board: tuple[int, ...]
     steps: list[StepResult]
+    rollout_id: int = 0
 
     @property
     def solved(self) -> bool:
@@ -58,6 +59,7 @@ class EpisodeResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.example.example_id,
+            "rollout_id": self.rollout_id,
             "initial_board": list(self.example.board),
             "optimal_length": self.example.optimal_length,
             "outcome": self.outcome,
@@ -71,15 +73,23 @@ class EpisodeResult:
 @dataclass
 class EvaluationResult:
     episodes: list[EpisodeResult]
+    num_rollouts: int = 1
 
     def summary(self) -> dict[str, Any]:
+        examples = {episode.example.example_id for episode in self.episodes}
         count = len(self.episodes)
+        num_examples = len(examples)
+        solved = [episode for episode in self.episodes if episode.solved]
+        solved_examples = {
+            episode.example.example_id for episode in self.episodes if episode.solved
+        }
         outcomes = {outcome: sum(e.outcome == outcome for e in self.episodes) for outcome in (
             "solved", "illegal", "malformed", "truncated", "timeout"
         )}
-        solved = [episode for episode in self.episodes if episode.solved]
         return {
-            "num_examples": count,
+            "num_examples": num_examples,
+            "num_rollouts": self.num_rollouts,
+            "num_episodes": count,
             "solved": outcomes["solved"],
             "illegal": outcomes["illegal"],
             "malformed": outcomes["malformed"],
@@ -90,6 +100,9 @@ class EvaluationResult:
             "malformed_rate": outcomes["malformed"] / count if count else 0.0,
             "truncated_rate": outcomes["truncated"] / count if count else 0.0,
             "timeout_rate": outcomes["timeout"] / count if count else 0.0,
+            # pass@k is the fraction of distinct puzzles solved by at least one
+            # of the k independent rollouts.
+            "pass@k": len(solved_examples) / num_examples if num_examples else 0.0,
             "mean_reward": sum(e.reward for e in self.episodes) / count if count else 0.0,
             "mean_moves_taken": sum(e.moves_taken for e in self.episodes) / count if count else 0.0,
             "mean_solved_moves": (
@@ -115,6 +128,7 @@ def evaluate_episode(
     agent: MoveAgent,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
+    rollout_id: int = 0,
 ) -> EpisodeResult:
     """Run one puzzle with environment-authoritative state and scoring."""
 
@@ -124,7 +138,7 @@ def evaluate_episode(
     board = example.board
     steps: list[StepResult] = []
     if is_solved(board):
-        return EpisodeResult(example, "solved", 1.0, 0, board, steps)
+        return EpisodeResult(example, "solved", 1.0, 0, board, steps, rollout_id)
 
     for turn in range(1, max_turns + 1):
         available = tuple(legal_moves(board))
@@ -144,7 +158,8 @@ def evaluate_episode(
                 )
             )
             return EpisodeResult(
-                example, outcome, ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps
+                example, outcome, ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps,
+                rollout_id,
             )
         if move not in available:
             steps.append(
@@ -154,7 +169,8 @@ def evaluate_episode(
                 )
             )
             return EpisodeResult(
-                example, "illegal", ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps
+                example, "illegal", ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps,
+                rollout_id,
             )
 
         next_board = apply_move(board, move)
@@ -180,9 +196,12 @@ def evaluate_episode(
                 turn,
                 board,
                 steps,
+                rollout_id,
             )
 
-    return EpisodeResult(example, "timeout", TIMEOUT_REWARD, max_turns, board, steps)
+    return EpisodeResult(
+        example, "timeout", TIMEOUT_REWARD, max_turns, board, steps, rollout_id
+    )
 
 
 def evaluate(
@@ -190,9 +209,21 @@ def evaluate(
     agent: MoveAgent,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
+    num_rollouts: int = 1,
 ) -> EvaluationResult:
-    """Evaluate each example independently using the same stateless-request agent."""
+    """Evaluate each puzzle independently for ``num_rollouts`` sampled attempts."""
 
-    return EvaluationResult(
-        [evaluate_episode(example, agent, max_turns=max_turns) for example in examples]
-    )
+    if num_rollouts <= 0:
+        raise ValueError("num_rollouts must be positive")
+
+    episodes = [
+        evaluate_episode(
+            example,
+            agent,
+            max_turns=max_turns,
+            rollout_id=rollout_id,
+        )
+        for example in examples
+        for rollout_id in range(num_rollouts)
+    ]
+    return EvaluationResult(episodes, num_rollouts=num_rollouts)

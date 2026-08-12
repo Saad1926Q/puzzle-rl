@@ -238,6 +238,34 @@ def test_truncated_response_is_reported_separately() -> None:
     assert evaluate([task], TruncatedAgent()).summary()["truncated"] == 1
 
 
+def test_multiple_rollouts_report_rollout_metrics_and_pass_at_k() -> None:
+    class FirstFailsThenSolves:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def next_move(self, board: tuple[int, ...]) -> str:
+            self.calls += 1
+            return "bad" if self.calls == 1 else "<move>left</move>"
+
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    result = evaluate([task], FirstFailsThenSolves(), num_rollouts=3)
+    summary = result.summary()
+    assert len(result.episodes) == 3
+    assert summary["num_examples"] == 1
+    assert summary["num_rollouts"] == 3
+    assert summary["num_episodes"] == 3
+    assert summary["solved"] == 2
+    assert summary["malformed"] == 1
+    assert summary["pass@k"] == 1.0
+    assert [episode.rollout_id for episode in result.episodes] == [0, 1, 2]
+
+
+def test_num_rollouts_must_be_positive() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    with pytest.raises(ValueError, match="num_rollouts must be positive"):
+        evaluate([task], SequenceAgent(["<move>left</move>"]), num_rollouts=0)
+
+
 def test_valid_unsolved_trajectory_at_limit_gets_zero() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     result = evaluate_episode(task, SequenceAgent(["<move>right</move>"]), max_turns=1)

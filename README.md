@@ -58,8 +58,10 @@ uv run python scripts/run_eval_8puzzle.py \
 ```
 
 The full eval split is used by default. Use `--num-examples N` to evaluate only the
-first `N` rows. Other useful options include `--offset`, `--max-turns` (up to 120),
-`--reasoning-effort`, and `--max-tokens`.
+first `N` rows. Use `--num-rollouts K` for `K` independent attempts per puzzle; the
+summary then reports rollout metrics and exact `pass@k` (the fraction of puzzles solved
+by at least one rollout). Other useful options include `--offset`, `--max-turns` (up to
+120), `--reasoning-effort`, and `--max-tokens`.
 
 The output JSON contains metadata and aggregate metrics by default. To save complete
 per-example trajectories separately, add `--save-trajectories`:
@@ -67,6 +69,7 @@ per-example trajectories separately, add `--save-trajectories`:
 ```bash
 uv run python scripts/run_eval_8puzzle.py \
   --num-examples 10 \
+  --num-rollouts 3 \
   --save-trajectories \
   --output eval/results_8puzzle_deepseek_v4_flash.json
 ```
