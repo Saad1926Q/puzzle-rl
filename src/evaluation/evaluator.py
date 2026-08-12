@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from tqdm import tqdm
+
 from evaluation.constants import (
     DEFAULT_MAX_TURNS,
     ILLEGAL_OR_MALFORMED_REWARD,
@@ -216,6 +218,19 @@ def evaluate(
     if num_rollouts <= 0:
         raise ValueError("num_rollouts must be positive")
 
+    examples = list(examples)
+    episode_inputs = (
+        (example, rollout_id)
+        for example in examples
+        for rollout_id in range(num_rollouts)
+    )
+    episode_inputs = tqdm(
+        episode_inputs,
+        total=len(examples) * num_rollouts,
+        desc="Evaluating",
+        unit="episode",
+    )
+
     episodes = [
         evaluate_episode(
             example,
@@ -223,7 +238,6 @@ def evaluate(
             max_turns=max_turns,
             rollout_id=rollout_id,
         )
-        for example in examples
-        for rollout_id in range(num_rollouts)
+        for example, rollout_id in episode_inputs
     ]
     return EvaluationResult(episodes, num_rollouts=num_rollouts)
