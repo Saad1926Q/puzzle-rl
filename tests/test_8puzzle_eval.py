@@ -6,7 +6,9 @@ import pytest
 
 from evaluation.dataset import PuzzleExample, load_examples
 from evaluation.evaluator import evaluate, evaluate_episode, solved_reward
-from evaluation.model import DeepSeekAgent, build_messages, get_api_key, parse_move
+from evaluation.clients.deepseek import DeepSeekAgent
+from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.protocol import build_messages, get_api_key, parse_move
 
 
 @dataclass
@@ -51,6 +53,26 @@ def _fake_tool_call(arguments='{"move":"left"}', name="submit_move"):
     return [type("ToolCall", (), {"function": function})()]
 
 
+def _fake_responses_response(*, arguments='{"move":"left"}', status="completed"):
+    call = type(
+        "FunctionCall",
+        (),
+        {"type": "function_call", "name": "submit_move", "arguments": arguments},
+    )()
+    incomplete = type("Incomplete", (), {"reason": "max_output_tokens"})()
+    return type(
+        "Response",
+        (),
+        {
+            "output": [call],
+            "output_text": "",
+            "status": status,
+            "incomplete_details": incomplete if status == "incomplete" else None,
+            "usage": None,
+        },
+    )()
+
+
 def test_deepseek_strict_tool_call_is_canonicalized() -> None:
     class Completions:
         def create(self, **kwargs):
@@ -64,6 +86,36 @@ def test_deepseek_strict_tool_call_is_canonicalized() -> None:
     assert completions.kwargs["tool_choice"]["function"]["name"] == "submit_move"
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert agent.last_response_metadata["status"] == "tool_call"
+
+
+def test_openai_responses_tool_call_uses_responses_parameters() -> None:
+    class Responses:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_responses_response(arguments='{"move":"right"}')
+
+    responses = Responses()
+    client = type("Client", (), {"responses": responses})()
+    agent = OpenAIAgent(api_key="not-used", client=client, thinking=True)
+    assert parse_move(agent.next_move((1, 2, 3, 4, 5, 0, 7, 8, 6))) == "right"
+    assert responses.kwargs["tool_choice"]["name"] == "submit_move"
+    assert responses.kwargs["parallel_tool_calls"] is False
+    assert responses.kwargs["max_output_tokens"] == 4096
+    assert responses.kwargs["reasoning"]["effort"] == "low"
+    assert responses.kwargs["store"] is False
+
+
+def test_openai_responses_truncated_tool_call_is_not_accepted() -> None:
+    class Responses:
+        def create(self, **kwargs):
+            return _fake_responses_response(status="incomplete")
+
+    client = type("Client", (), {"responses": Responses()})()
+    agent = OpenAIAgent(api_key="not-used", client=client)
+    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.last_response_metadata["truncated"] is True
+    assert agent.last_response_metadata["status"] == "truncated"
+    assert agent.last_response_metadata["incomplete_reason"] == "max_output_tokens"
 
 
 def test_deepseek_thinking_mode_reads_tool_call_and_reasoning_metadata() -> None:
@@ -260,6 +312,46 @@ def test_multiple_rollouts_report_rollout_metrics_and_pass_at_k() -> None:
     assert [episode.rollout_id for episode in result.episodes] == [0, 1, 2]
 
 
+def test_parallel_rollouts_preserve_order_and_isolate_agents() -> None:
+    import threading
+
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    lock = threading.Lock()
+    created = 0
+
+    class WorkerAgent:
+        def __init__(self, worker_id: int) -> None:
+            self.worker_id = worker_id
+            self.last_response_metadata = {"worker_id": worker_id}
+
+        def next_move(self, board: tuple[int, ...]) -> str:
+            return "<move>left</move>"
+
+    def factory() -> WorkerAgent:
+        nonlocal created
+        with lock:
+            worker_id = created
+            created += 1
+        return WorkerAgent(worker_id)
+
+    result = evaluate(
+        [task, task], num_rollouts=2, parallelism=2, agent_factory=factory
+    )
+    assert len(result.episodes) == 4
+    assert [(episode.example.example_id, episode.rollout_id) for episode in result.episodes] == [
+        ("test", 0), ("test", 1), ("test", 0), ("test", 1)
+    ]
+    assert {episode.steps[0].response_metadata["worker_id"] for episode in result.episodes} == {
+        0, 1, 2, 3
+    }
+
+
+def test_parallelism_requires_agent_factory() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    with pytest.raises(ValueError, match="agent_factory is required"):
+        evaluate([task], SequenceAgent(["<move>left</move>"]), parallelism=2)
+
+
 def test_num_rollouts_must_be_positive() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     with pytest.raises(ValueError, match="num_rollouts must be positive"):
@@ -274,10 +366,10 @@ def test_valid_unsolved_trajectory_at_limit_gets_zero() -> None:
     assert result.moves_taken == 1
 
 
-def test_turn_limit_cannot_exceed_120() -> None:
+def test_turn_limit_cannot_exceed_45() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
-    with pytest.raises(ValueError, match="between 1 and 120"):
-        evaluate_episode(task, SequenceAgent([]), max_turns=121)
+    with pytest.raises(ValueError, match="between 1 and 45"):
+        evaluate_episode(task, SequenceAgent([]), max_turns=46)
 
 
 def test_harness_runs_ten_huggingface_dataset_examples(monkeypatch) -> None:

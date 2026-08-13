@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +22,18 @@ from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_MODEL,
+    DEFAULT_OPENAI_API_KEY_ENV,
+    DEFAULT_OPENAI_BASE_URL,
+    DEFAULT_OPENAI_MODEL,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_THINKING,
     MAX_TURNS,
 )
 from evaluation.dataset import load_examples
 from evaluation.evaluator import EvaluationResult, evaluate
-from evaluation.model import DeepSeekAgent, get_api_key
+from evaluation.clients.deepseek import DeepSeekAgent
+from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.protocol import get_api_key
 
 
 def bounded_max_turns(value: str) -> int:
@@ -62,10 +68,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Independent rollouts per puzzle (default: 1)",
     )
-    parser.add_argument("--max-turns", type=bounded_max_turns, default=DEFAULT_MAX_TURNS)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--api-key-env", default=DEFAULT_API_KEY_ENV)
+    parser.add_argument(
+        "--parallelism",
+        type=positive_int,
+        default=1,
+        help="Concurrent rollout workers (default: 1)",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=bounded_max_turns,
+        default=DEFAULT_MAX_TURNS,
+        help="Maximum moves per episode (default: 45)",
+    )
+    parser.add_argument("--provider", choices=("deepseek", "openai"), default="deepseek")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--base-url", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--dotenv", type=Path, default=Path(".env"))
     thinking_group = parser.add_mutually_exclusive_group()
     thinking_group.add_argument(
@@ -81,12 +99,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable reasoning and force the strict named tool call",
     )
     parser.set_defaults(thinking=DEFAULT_THINKING)
-    parser.add_argument("--reasoning-effort", choices=("low", "high", "max"), default=DEFAULT_REASONING_EFFORT)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("low", "medium", "high", "max"),
+        default=DEFAULT_REASONING_EFFORT,
+    )
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("eval/results_8puzzle_deepseek_v4_flash.json"),
+        default=None,
         help="JSON file for summary metrics",
     )
     parser.add_argument(
@@ -99,6 +121,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_provider_args(args: argparse.Namespace) -> None:
+    if args.provider == "deepseek":
+        args.model = args.model or DEFAULT_MODEL
+        args.base_url = args.base_url or DEFAULT_BASE_URL
+        args.api_key_env = args.api_key_env or DEFAULT_API_KEY_ENV
+    else:
+        args.model = args.model or DEFAULT_OPENAI_MODEL
+        args.base_url = args.base_url or DEFAULT_OPENAI_BASE_URL
+        args.api_key_env = args.api_key_env or DEFAULT_OPENAI_API_KEY_ENV
+
+
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
     return {
         "dataset": args.dataset,
@@ -106,8 +139,10 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "split": args.split,
         "num_examples": actual_num_examples,
         "num_rollouts": args.num_rollouts,
+        "parallelism": args.parallelism,
         "offset": args.offset,
         "max_turns": args.max_turns,
+        "provider": args.provider,
         "model": args.model,
         "base_url": args.base_url,
         "thinking": args.thinking,
@@ -119,6 +154,14 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
 
 def main() -> None:
     args = build_parser().parse_args()
+    resolve_provider_args(args)
+    if args.output is None:
+        filename = (
+            "results_8puzzle_deepseek_v4_flash.json"
+            if args.provider == "deepseek"
+            else "results_8puzzle_openai.json"
+        )
+        args.output = Path("eval") / filename
     examples = load_examples(
         dataset=args.dataset,
         config=args.config,
@@ -128,20 +171,38 @@ def main() -> None:
     )
 
     api_key = get_api_key(args.api_key_env, args.dotenv)
-    agent = DeepSeekAgent(
-        api_key=api_key,
-        model=args.model,
-        base_url=args.base_url,
-        thinking=args.thinking,
-        reasoning_effort=args.reasoning_effort,
-        max_tokens=args.max_tokens,
-    )
+    worker_local = threading.local()
+
+    def agent_factory() -> DeepSeekAgent | OpenAIAgent:
+        agent = getattr(worker_local, "agent", None)
+        if agent is None:
+            if args.provider == "deepseek":
+                agent = DeepSeekAgent(
+                    api_key=api_key,
+                    model=args.model,
+                    base_url=args.base_url,
+                    thinking=args.thinking,
+                    reasoning_effort=args.reasoning_effort,
+                    max_tokens=args.max_tokens,
+                )
+            else:
+                agent = OpenAIAgent(
+                    api_key=api_key,
+                    model=args.model,
+                    base_url=args.base_url,
+                    thinking=args.thinking,
+                    reasoning_effort=args.reasoning_effort,
+                    max_tokens=args.max_tokens,
+                )
+            worker_local.agent = agent
+        return agent
 
     result: EvaluationResult = evaluate(
         examples,
-        agent,
         max_turns=args.max_turns,
         num_rollouts=args.num_rollouts,
+        parallelism=args.parallelism,
+        agent_factory=agent_factory,
     )
     run_metadata = metadata(args, len(examples))
     summary_output = {"metadata": run_metadata, "summary": result.summary()}

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from tqdm import tqdm
 
@@ -16,7 +17,7 @@ from evaluation.constants import (
     TIMEOUT_REWARD,
 )
 from evaluation.dataset import PuzzleExample
-from evaluation.model import MoveAgent, parse_move
+from evaluation.protocol import MoveAgent, parse_move
 from puzzle3.board import apply_move, is_solved, legal_moves
 
 
@@ -208,36 +209,69 @@ def evaluate_episode(
 
 def evaluate(
     examples: Iterable[PuzzleExample],
-    agent: MoveAgent,
+    agent: MoveAgent | None = None,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
     num_rollouts: int = 1,
+    parallelism: int = 1,
+    agent_factory: Callable[[], MoveAgent] | None = None,
 ) -> EvaluationResult:
-    """Evaluate each puzzle independently for ``num_rollouts`` sampled attempts."""
+    """Evaluate independent puzzle rollouts, optionally in parallel.
+
+    Turns within one episode remain sequential. When ``parallelism > 1``, callers
+    must provide ``agent_factory`` so each worker gets an isolated model client and
+    response metadata store; sharing one mutable agent across threads is unsafe.
+    """
 
     if num_rollouts <= 0:
         raise ValueError("num_rollouts must be positive")
+    if parallelism <= 0:
+        raise ValueError("parallelism must be positive")
+    if agent is None and agent_factory is None:
+        raise ValueError("provide agent or agent_factory")
+    if parallelism > 1 and agent_factory is None:
+        raise ValueError("agent_factory is required when parallelism > 1")
 
     examples = list(examples)
-    episode_inputs = (
-        (example, rollout_id)
-        for example in examples
+    jobs = [
+        (example_index, example, rollout_id)
+        for example_index, example in enumerate(examples)
         for rollout_id in range(num_rollouts)
-    )
-    episode_inputs = tqdm(
-        episode_inputs,
-        total=len(examples) * num_rollouts,
-        desc="Evaluating",
-        unit="episode",
-    )
+    ]
 
-    episodes = [
-        evaluate_episode(
+    def run_job(job: tuple[int, PuzzleExample, int]) -> tuple[int, int, EpisodeResult]:
+        example_index, example, rollout_id = job
+        episode_agent = agent_factory() if agent_factory is not None else agent
+        assert episode_agent is not None
+        episode = evaluate_episode(
             example,
-            agent,
+            episode_agent,
             max_turns=max_turns,
             rollout_id=rollout_id,
         )
-        for example, rollout_id in episode_inputs
+        return example_index, rollout_id, episode
+
+    episodes_by_key: dict[tuple[int, int], EpisodeResult] = {}
+    progress = tqdm(total=len(jobs), desc="Evaluating", unit="episode")
+    try:
+        if parallelism == 1:
+            for job in jobs:
+                example_index, rollout_id, episode = run_job(job)
+                episodes_by_key[(example_index, rollout_id)] = episode
+                progress.update(1)
+        else:
+            with ThreadPoolExecutor(max_workers=parallelism) as executor:
+                futures = [executor.submit(run_job, job) for job in jobs]
+                for future in as_completed(futures):
+                    example_index, rollout_id, episode = future.result()
+                    episodes_by_key[(example_index, rollout_id)] = episode
+                    progress.update(1)
+    finally:
+        progress.close()
+
+    episodes = [
+        episodes_by_key[(example_index, rollout_id)]
+        for example_index, _example in enumerate(examples)
+        for rollout_id in range(num_rollouts)
     ]
     return EvaluationResult(episodes, num_rollouts=num_rollouts)
