@@ -1,6 +1,8 @@
-GOAL = (1, 2, 3, 4, 5, 6, 7, 8, 0)
+type Board = tuple[int, ...]
+type TileAction = int
+
+GOAL: Board = (1, 2, 3, 4, 5, 6, 7, 8, 0)
 WIDTH = 3
-MOVE_DELTA = {"up": (1, 0), "down": (-1, 0), "left": (0, 1), "right": (0, -1)}
 
 
 def index_to_rc(idx: int) -> tuple[int, int]:
@@ -10,21 +12,9 @@ def index_to_rc(idx: int) -> tuple[int, int]:
 
 
 def rc_to_index(r: int, c: int) -> int:
-    """Convert (row, col) to flat index for a 3x3 grid."""
+    """Convert (row, col) to index for a 3x3 grid."""
 
     return r * WIDTH + c
-
-
-def _get_opposite(move: str):
-    """Return the move that immediately undoes the given move."""
-
-    if move == "up":
-        return "down"
-    if move == "down":
-        return "up"
-    if move == "left":
-        return "right"
-    return "left"
 
 
 def _build_goal_pos() -> dict[int, tuple[int, int]]:
@@ -33,30 +23,23 @@ def _build_goal_pos() -> dict[int, tuple[int, int]]:
     return {tile: index_to_rc(idx) for idx, tile in enumerate(GOAL)}
 
 
-def _build_legal_move_table() -> tuple[tuple[str, ...], ...]:
-    """Precompute legal move names for each possible blank position."""
-
-    table = []
-    for blank_idx in range(len(GOAL)):
-        blank_r, blank_c = index_to_rc(blank_idx)
-        moves = []
-        if blank_r < WIDTH - 1:
-            moves.append("up")
-        if blank_r > 0:
-            moves.append("down")
-        if blank_c < WIDTH - 1:
-            moves.append("left")
-        if blank_c > 0:
-            moves.append("right")
-        table.append(tuple(moves))
-    return tuple(table)
-
-
 GOAL_POS = _build_goal_pos()
-LEGAL_MOVE_TABLE = _build_legal_move_table()
+
+# Board connectivity for each possible blank index, in stable row-major order.
+_NEIGHBOR_INDICES: tuple[tuple[int, ...], ...] = (
+    (1, 3),
+    (0, 2, 4),
+    (1, 5),
+    (0, 4, 6),
+    (1, 3, 5, 7),
+    (2, 4, 8),
+    (3, 7),
+    (4, 6, 8),
+    (5, 7),
+)
 
 
-def get_blank_idx(board: tuple[int, ...]) -> int:
+def get_blank_idx(board: Board) -> int:
     """Get the index of the blank (0) tile."""
 
     return board.index(0)
@@ -68,66 +51,39 @@ def get_goal_rc(tile_value: int) -> tuple[int, int]:
     return GOAL_POS[tile_value]
 
 
-def legal_moves(board: tuple[int, ...]) -> list[str]:
-    """
-    Get legal move commands for the board.
-
-    Tile-moving convention: a command names what the numbered tile does.
-    For example, "left" means the tile to the right of the blank slides left into it.
-    """
-
-    return list(LEGAL_MOVE_TABLE[get_blank_idx(board)])
-
-
-def get_non_reversing_moves(board: tuple[int, ...], last_move: str | None) -> list[str]:
-    """Get legal moves while excluding the immediate reversal of last_move."""
-
-    moves = legal_moves(board)
-    if last_move is None:
-        return moves
-    return [move for move in moves if move != _get_opposite(last_move)]
-
-
-def tile_for_move(board: tuple[int, ...], move: str) -> int:
-    """Return the numbered tile moved by a legal internal direction."""
+def adjacent_tiles(board: Board) -> tuple[int, ...]:
+    """Return tile IDs that can currently slide into the blank."""
 
     blank_idx = get_blank_idx(board)
+    return tuple(board[index] for index in _NEIGHBOR_INDICES[blank_idx])
+
+
+def slide_tile(board: Board, tile: TileAction) -> Board:
+    """Slide an adjacent numbered tile into the blank."""
+
+    if type(tile) is not int or not 1 <= tile <= 8:
+        raise ValueError("tile must be an integer from 1 through 8")
+
+    try:
+        blank_idx = get_blank_idx(board)
+        tile_idx = board.index(tile)
+    except ValueError as exc:
+        raise ValueError(f"tile {tile} and blank must be present on the board") from exc
+
     blank_r, blank_c = index_to_rc(blank_idx)
-    dr, dc = MOVE_DELTA[move]
-    return board[rc_to_index(blank_r + dr, blank_c + dc)]
-
-
-def adjacent_tiles(board: tuple[int, ...]) -> tuple[int, ...]:
-    """Return the numbered tiles that can slide into the blank."""
-
-    return tuple(tile_for_move(board, move) for move in legal_moves(board))
-
-
-def move_for_tile(board: tuple[int, ...], tile: int) -> str | None:
-    """Resolve an adjacent tile ID to its internal physical move direction."""
-
-    for move in legal_moves(board):
-        if tile_for_move(board, move) == tile:
-            return move
-    return None
-
-
-def apply_move(board: tuple[int, ...], move: str) -> tuple[int, ...]:
-    """Apply a legal internal move direction and return the resulting board."""
+    tile_r, tile_c = index_to_rc(tile_idx)
+    if abs(blank_r - tile_r) + abs(blank_c - tile_c) != 1:
+        raise ValueError(f"tile {tile} is not adjacent to the blank")
 
     new_board = list(board)
-    blank_idx = get_blank_idx(board)
-    blank_r, blank_c = index_to_rc(blank_idx)
-    dr, dc = MOVE_DELTA[move]
-    target_idx = rc_to_index(blank_r + dr, blank_c + dc)
-    new_board[blank_idx], new_board[target_idx] = (
-        new_board[target_idx],
+    new_board[blank_idx], new_board[tile_idx] = (
+        new_board[tile_idx],
         new_board[blank_idx],
     )
     return tuple(new_board)
 
 
-def is_solved(board: tuple[int, ...]) -> bool:
+def is_solved(board: Board) -> bool:
     """Check whether the board is in the solved state."""
 
     return board == GOAL

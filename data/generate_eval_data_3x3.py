@@ -7,7 +7,9 @@ from typing import Any
 
 from datasets import Dataset
 
-from puzzle3.board import GOAL, _get_opposite, apply_move, legal_moves
+from evaluation.constants import ACTION_INTERFACE
+from puzzle3.board import Board, GOAL, TileAction, adjacent_tiles, slide_tile
+
 
 BUCKETS = (
     ("easy", 1, 5),
@@ -26,49 +28,49 @@ def _compute_bucket_counts(num_tasks: int) -> list[tuple[str, int, int, int]]:
     ]
 
 
-def _enumerate_from_goal() -> dict[tuple[int, ...], list[str]]:
-    """Return every reachable 8-puzzle state with an optimal path from GOAL to it."""
+def _enumerate_from_goal() -> dict[Board, list[TileAction]]:
+    """Return every reachable 8-puzzle state with an optimal path from GOAL."""
 
     queue = deque([GOAL])
-    paths = {GOAL: []}
+    paths: dict[Board, list[TileAction]] = {GOAL: []}
 
     while queue:
         board = queue.popleft()
-        for move in legal_moves(board):
-            nxt = apply_move(board, move)
+        for tile in adjacent_tiles(board):
+            nxt = slide_tile(board, tile)
             if nxt in paths:
                 continue
-            paths[nxt] = [*paths[board], move]
+            paths[nxt] = [*paths[board], tile]
             queue.append(nxt)
 
     return paths
 
 
-def _solution_from_goal_path(path_from_goal: list[str]) -> list[str]:
-    """Convert GOAL->board path to board->GOAL solution moves."""
+def _solution_from_goal_path(path_from_goal: list[TileAction]) -> list[TileAction]:
+    """Reverse a GOAL->board path into a board->GOAL solution."""
 
-    return [_get_opposite(move) for move in reversed(path_from_goal)]
+    return list(reversed(path_from_goal))
 
 
 def _make_eval_record(
-    board: tuple[int, ...], bucket: str, path_from_goal: list[str]
+    board: Board, bucket: str, path_from_goal: list[TileAction]
 ) -> dict[str, Any]:
-    optimal_moves = _solution_from_goal_path(path_from_goal)
+    optimal_actions = _solution_from_goal_path(path_from_goal)
     return {
         "board": list(board),
-        "scramble_depth": len(optimal_moves),
+        "scramble_depth": len(optimal_actions),
         "bucket": bucket,
-        "split": "eval_3x3",
-        "optimal_moves": optimal_moves,
-        "optimal_length": len(optimal_moves),
+        "action_interface": ACTION_INTERFACE,
+        "optimal_actions": optimal_actions,
+        "optimal_length": len(optimal_actions),
     }
 
 
 def _select_state_quantiles(
-    choices: list[tuple[tuple[int, ...], list[str]]],
+    choices: list[tuple[Board, list[TileAction]]],
     count: int,
     rng: random.Random,
-) -> list[tuple[tuple[int, ...], list[str]]]:
+) -> list[tuple[Board, list[TileAction]]]:
     """Select quantiles from states ordered by optimal distance."""
 
     if count == 0:
@@ -78,10 +80,10 @@ def _select_state_quantiles(
             f"requested {count} puzzles but only {len(choices)} are available"
         )
 
-    by_depth: dict[int, list[tuple[tuple[int, ...], list[str]]]] = defaultdict(list)
+    by_depth: dict[int, list[tuple[Board, list[TileAction]]]] = defaultdict(list)
     for choice in choices:
         by_depth[len(choice[1])].append(choice)
-    ordered: list[tuple[tuple[int, ...], list[str]]] = []
+    ordered: list[tuple[Board, list[TileAction]]] = []
     for depth in sorted(by_depth):
         depth_choices = by_depth[depth]
         rng.shuffle(depth_choices)
@@ -100,7 +102,7 @@ def generate_eval_candidates(
     num_tasks: int, rng: random.Random
 ) -> list[dict[str, Any]]:
     paths = _enumerate_from_goal()
-    by_bucket: dict[str, list[tuple[tuple[int, ...], list[str]]]] = defaultdict(list)
+    by_bucket: dict[str, list[tuple[Board, list[TileAction]]]] = defaultdict(list)
 
     for board, path in paths.items():
         depth = len(path)

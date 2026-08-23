@@ -9,8 +9,9 @@ from typing import Any
 
 from datasets import load_dataset
 
-from evaluation.constants import VALID_MOVE_SET
-from puzzle3.board import GOAL
+from evaluation.constants import ACTION_INTERFACE
+from puzzle3.board import Board, GOAL, TileAction, adjacent_tiles, slide_tile
+from puzzle3.solver import exact_distance
 
 DEFAULT_DATASET = "saad1926q/8-puzzle"
 DEFAULT_CONFIG = "eval"
@@ -26,8 +27,8 @@ class PuzzleExample:
     """One authoritative puzzle task from the evaluation dataset."""
 
     example_id: str
-    board: tuple[int, ...]
-    optimal_moves: tuple[str, ...]
+    board: Board
+    optimal_actions: tuple[TileAction, ...]
     optimal_length: int
     metadata: dict[str, Any]
 
@@ -35,13 +36,19 @@ class PuzzleExample:
         return {
             "id": self.example_id,
             "board": list(self.board),
-            "optimal_moves": list(self.optimal_moves),
+            "optimal_actions": list(self.optimal_actions),
             "optimal_length": self.optimal_length,
             **self.metadata,
         }
 
 
 def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
+    if "optimal_moves" in row:
+        raise DatasetError(
+            f"{example_id}: legacy optimal_moves is unsupported; "
+            "use integer optimal_actions with action_interface=tile_id_v1"
+        )
+
     try:
         board = tuple(int(value) for value in row["board"])
     except (KeyError, TypeError, ValueError) as exc:
@@ -50,27 +57,68 @@ def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
     if len(board) != 9 or set(board) != set(GOAL):
         raise DatasetError(f"{example_id}: board must be a permutation of 0..8")
 
-    try:
-        optimal_moves = tuple(
-            str(move).strip().lower() for move in row["optimal_moves"]
-        )
-        optimal_length = int(row["optimal_length"])
-    except (KeyError, TypeError, ValueError) as exc:
+    if row.get("action_interface") != ACTION_INTERFACE:
         raise DatasetError(
-            f"{example_id}: optimal_moves and optimal_length are required"
+            f"{example_id}: action_interface must be {ACTION_INTERFACE!r}"
+        )
+
+    try:
+        raw_actions = row["optimal_actions"]
+        optimal_length = row["optimal_length"]
+    except (KeyError, TypeError) as exc:
+        raise DatasetError(
+            f"{example_id}: optimal_actions and optimal_length are required"
         ) from exc
 
-    if any(move not in VALID_MOVE_SET for move in optimal_moves):
-        raise DatasetError(f"{example_id}: optimal_moves contains an unknown move")
-    if optimal_length != len(optimal_moves) or optimal_length < 0:
-        raise DatasetError(f"{example_id}: optimal_length does not match optimal_moves")
+    if not isinstance(raw_actions, (list, tuple)):
+        raise DatasetError(f"{example_id}: optimal_actions must be a list of integers")
+    optimal_actions = tuple(raw_actions)
+    for index, action in enumerate(optimal_actions):
+        if type(action) is not int:
+            raise DatasetError(
+                f"{example_id}: optimal_actions[{index}] must have exact type int"
+            )
+        if not 1 <= action <= 8:
+            raise DatasetError(
+                f"{example_id}: optimal_actions[{index}] must be between 1 and 8"
+            )
+
+    if type(optimal_length) is not int:
+        raise DatasetError(f"{example_id}: optimal_length must have exact type int")
+    if optimal_length != len(optimal_actions) or optimal_length < 0:
+        raise DatasetError(
+            f"{example_id}: optimal_length does not match optimal_actions"
+        )
+
+    replayed = board
+    for index, action in enumerate(optimal_actions):
+        if action not in adjacent_tiles(replayed):
+            raise DatasetError(
+                f"{example_id}: optimal_actions[{index}]={action} is illegal "
+                f"from board {list(replayed)}"
+            )
+        replayed = slide_tile(replayed, action)
+    if replayed != GOAL:
+        raise DatasetError(f"{example_id}: optimal_actions do not solve the board")
+
+    try:
+        distance = exact_distance(board)
+    except ValueError as exc:
+        raise DatasetError(
+            f"{example_id}: board is not a solvable 8-puzzle state"
+        ) from exc
+    if distance != optimal_length:
+        raise DatasetError(
+            f"{example_id}: optimal_length {optimal_length} does not equal "
+            f"exact distance {distance}"
+        )
 
     metadata = {
         key: value
         for key, value in row.items()
-        if key not in {"board", "optimal_moves", "optimal_length"}
+        if key not in {"board", "optimal_actions", "optimal_length"}
     }
-    return PuzzleExample(example_id, board, optimal_moves, optimal_length, metadata)
+    return PuzzleExample(example_id, board, optimal_actions, optimal_length, metadata)
 
 
 def _load_rows(

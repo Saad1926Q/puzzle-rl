@@ -1,7 +1,7 @@
-from puzzle3.board import GOAL, GOAL_POS, index_to_rc
+from puzzle3.board import Board, GOAL, GOAL_POS, index_to_rc
 
 
-def manhattan(board: tuple[int, ...]) -> int:
+def manhattan(board: Board) -> int:
     """Sum of Manhattan distances of each tile from its goal position."""
 
     dist = 0
@@ -14,7 +14,7 @@ def manhattan(board: tuple[int, ...]) -> int:
     return dist
 
 
-def misplaced_tiles(board: tuple[int, ...]) -> int:
+def misplaced_tiles(board: Board) -> int:
     """Count non-blank tiles that are not in their goal position."""
 
     return sum(tile != 0 and tile != GOAL[idx] for idx, tile in enumerate(board))

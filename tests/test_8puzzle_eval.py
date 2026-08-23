@@ -6,7 +6,7 @@ import json
 import pytest
 from datasets import Dataset
 
-from evaluation.dataset import PuzzleExample, load_examples
+from evaluation.dataset import DatasetError, PuzzleExample, load_examples
 from evaluation.evaluator import (
     evaluate,
     evaluate_episode,
@@ -25,7 +25,7 @@ from puzzle3.solver import exact_distance
 class SequenceAgent:
     responses: list[str]
 
-    def next_move(self, board: tuple[int, ...]) -> str:
+    def next_action(self, board: tuple[int, ...]) -> str:
         return self.responses.pop(0)
 
 
@@ -100,7 +100,7 @@ def test_deepseek_strict_tool_call_is_canonicalized() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
-    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
     assert completions.kwargs["tool_choice"]["function"]["name"] == "slide_tile"
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert agent.last_response_metadata["status"] == "tool_call"
@@ -117,7 +117,7 @@ def test_glm_tool_call_uses_zai_parameters() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = GLMAgent(api_key="not-used", client=client, thinking=True)
-    assert parse_tile(agent.next_move((1, 2, 0, 4, 5, 3, 7, 8, 6))) == 3
+    assert parse_tile(agent.next_action((1, 2, 0, 4, 5, 3, 7, 8, 6))) == 3
     assert completions.kwargs["tool_choice"] == "auto"
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
     assert "reasoning_effort" not in completions.kwargs
@@ -135,7 +135,7 @@ def test_glm_disabled_thinking_is_explicit() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = GLMAgent(api_key="not-used", client=client, thinking=False)
-    agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
@@ -148,7 +148,7 @@ def test_openai_responses_tool_call_uses_responses_parameters() -> None:
     responses = Responses()
     client = type("Client", (), {"responses": responses})()
     agent = OpenAIAgent(api_key="not-used", client=client, thinking=True)
-    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 0, 7, 8, 6))) == 6
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 0, 7, 8, 6))) == 6
     assert responses.kwargs["tool_choice"]["name"] == "slide_tile"
     assert responses.kwargs["parallel_tool_calls"] is False
     assert responses.kwargs["max_output_tokens"] == 4096
@@ -163,7 +163,7 @@ def test_openai_responses_truncated_tool_call_is_not_accepted() -> None:
 
     client = type("Client", (), {"responses": Responses()})()
     agent = OpenAIAgent(api_key="not-used", client=client)
-    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["truncated"] is True
     assert agent.last_response_metadata["status"] == "truncated"
     assert agent.last_response_metadata["incomplete_reason"] == "max_output_tokens"
@@ -183,7 +183,7 @@ def test_deepseek_thinking_mode_reads_tool_call_and_reasoning_metadata() -> None
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=True)
-    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 3
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 3
     assert completions.kwargs["tool_choice"] == "auto"
     assert agent.last_response_metadata["reasoning_content_length"] > 0
 
@@ -200,7 +200,7 @@ def test_deepseek_multiple_tool_calls_are_malformed() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
-    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["tool_call_count"] == 2
     assert agent.last_response_metadata["status"] == "malformed"
 
@@ -217,7 +217,7 @@ def test_deepseek_truncated_tool_call_is_not_accepted() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
-    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["truncated"] is True
     assert agent.last_response_metadata["status"] == "truncated"
 
@@ -237,7 +237,7 @@ def test_deepseek_empty_or_truncated_response_is_diagnosed() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=True)
-    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["status"] == "truncated"
     assert agent.last_response_metadata["truncated"] is True
     assert agent.last_response_metadata["reasoning_content_length"] == 7
@@ -253,7 +253,7 @@ def test_deepseek_malformed_tool_arguments_are_diagnosed() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
-    assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
+    assert agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["tool_name"] == "slide_tile"
     assert agent.last_response_metadata["status"] == "malformed"
 
@@ -269,7 +269,7 @@ def test_deepseek_provider_error_is_not_relabelled_as_malformed() -> None:
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
     with pytest.raises(RuntimeError, match="provider unavailable"):
-        agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
+        agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert agent.last_response_metadata["status"] == "api_error"
 
 
@@ -295,8 +295,8 @@ def test_deepseek_adapter_starts_a_fresh_request_each_turn() -> None:
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
     agent = DeepSeekAgent(api_key="not-used", client=client)
-    agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
-    agent.next_move((1, 2, 3, 4, 5, 6, 0, 7, 8))
+    agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    agent.next_action((1, 2, 3, 4, 5, 6, 0, 7, 8))
     assert len(completions.calls) == 2
     assert len(completions.calls[0]["messages"]) == 2
     assert completions.calls[0]["messages"][1] != completions.calls[1]["messages"][1]
@@ -309,7 +309,8 @@ def test_local_jsonl_eval_subset_is_supported(tmp_path) -> None:
         json.dumps(
             {
                 "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
-                "optimal_moves": ["left"],
+                "action_interface": "tile_id_v1",
+                "optimal_actions": [8],
                 "optimal_length": 1,
                 "bucket": "easy",
             }
@@ -323,13 +324,32 @@ def test_local_jsonl_eval_subset_is_supported(tmp_path) -> None:
     assert tasks[0].metadata["bucket"] == "easy"
 
 
+def test_legacy_directional_dataset_rows_are_rejected(tmp_path) -> None:
+    path = tmp_path / "legacy.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+                "optimal_moves": ["left"],
+                "optimal_length": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DatasetError, match="legacy optimal_moves is unsupported"):
+        load_examples(dataset=str(path))
+
+
 def test_local_parquet_eval_subset_is_supported(tmp_path) -> None:
     path = tmp_path / "eval.parquet"
     Dataset.from_list(
         [
             {
                 "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
-                "optimal_moves": ["left"],
+                "action_interface": "tile_id_v1",
+                "optimal_actions": [8],
                 "optimal_length": 1,
                 "bucket": "easy",
             }
@@ -388,11 +408,15 @@ def test_solved_episode_includes_terminal_and_progress_rewards() -> None:
     assert result.reward == pytest.approx(1.0 + 0.25 / 31)
     assert result.steps[0].terminal_reward == pytest.approx(1.0)
     assert result.steps[0].progress_reward == pytest.approx(0.25 / 31)
-    assert result.steps[0].legal_tiles == (5, 8, 7)
+    assert result.steps[0].legal_tiles == (5, 7, 8)
     assert result.steps[0].tile == 8
-    assert result.steps[0].move == "left"
-    assert result.moves_taken == 1
     assert result.final_board == (1, 2, 3, 4, 5, 6, 7, 8, 0)
+
+
+def test_serialized_steps_contain_no_directional_move_field() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    result = evaluate_episode(task, SequenceAgent(['{"tile": 8}']))
+    assert "move" not in result.steps[0].to_dict()
 
 
 def test_illegal_move_ends_immediately_with_negative_reward() -> None:
@@ -402,10 +426,8 @@ def test_illegal_move_ends_immediately_with_negative_reward() -> None:
     assert result.reward == -1.0
     assert result.steps[0].progress_reward == 0.0
     assert result.steps[0].terminal_reward == -1.0
-    assert result.steps[0].legal_tiles == (5, 8, 7)
+    assert result.steps[0].legal_tiles == (5, 7, 8)
     assert result.steps[0].tile == 1
-    assert result.steps[0].move is None
-    assert result.moves_taken == 0
     assert len(result.steps) == 1
 
 
@@ -422,7 +444,7 @@ def test_truncated_response_is_reported_separately() -> None:
     class TruncatedAgent:
         last_response_metadata = {"truncated": True}
 
-        def next_move(self, board: tuple[int, ...]) -> str:
+        def next_action(self, board: tuple[int, ...]) -> str:
             return ""
 
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
@@ -439,7 +461,7 @@ def test_multiple_rollouts_report_rollout_metrics_and_pass_at_k() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def next_move(self, board: tuple[int, ...]) -> str:
+        def next_action(self, board: tuple[int, ...]) -> str:
             self.calls += 1
             return "bad" if self.calls == 1 else '{"tile": 8}'
 
@@ -468,7 +490,7 @@ def test_parallel_rollouts_preserve_order_and_isolate_agents() -> None:
             self.worker_id = worker_id
             self.last_response_metadata = {"worker_id": worker_id}
 
-        def next_move(self, board: tuple[int, ...]) -> str:
+        def next_action(self, board: tuple[int, ...]) -> str:
             return '{"tile": 8}'
 
     def factory() -> WorkerAgent:
@@ -524,21 +546,21 @@ def test_harness_runs_ten_huggingface_dataset_examples(monkeypatch) -> None:
     rows = [
         {
             "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
-            "optimal_moves": ["left"],
+            "action_interface": "tile_id_v1",
+            "optimal_actions": [8],
             "optimal_length": 1,
         }
     ] * 10
     monkeypatch.setattr(dataset_module, "load_dataset", lambda *args, **kwargs: rows)
     tasks = load_examples(limit=10)
 
-    # Use a fresh oracle that derives the next move from the current board by BFS;
+    # Use a fresh oracle that derives the next action from the current board by BFS;
     # this makes the smoke test independent of any model or credentials.
     from puzzle3.solver import solve
-    from puzzle3.board import tile_for_move
 
     class BfsOracle:
-        def next_move(self, board: tuple[int, ...]) -> str:
-            return json.dumps({"tile": tile_for_move(board, solve(board)[0])})
+        def next_action(self, board: tuple[int, ...]) -> str:
+            return json.dumps({"tile": solve(board)[0]})
 
     result = evaluate(tasks, BfsOracle())
     assert len(result.episodes) == 10

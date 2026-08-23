@@ -10,9 +10,10 @@ from evaluation.constants import (
     DEFAULT_GLM_MODEL,
     DEFAULT_MAX_TOKENS,
     DEFAULT_THINKING,
-    MOVE_TOOL,
+    SLIDE_TILE_TOOL,
 )
 from evaluation.protocol import build_messages
+from puzzle3.board import Board
 
 
 class GLMAgent:
@@ -42,11 +43,11 @@ class GLMAgent:
         self.max_tokens = max_tokens
         self.last_response_metadata: dict[str, Any] = {}
 
-    def next_move(self, board: tuple[int, ...]) -> str:
+    def next_action(self, board: Board) -> str:
         request: dict[str, Any] = {
             "model": self.model,
             "messages": build_messages(board),
-            "tools": [MOVE_TOOL],
+            "tools": [SLIDE_TILE_TOOL],
             # Z.AI currently supports only auto tool selection.
             "tool_choice": "auto",
             "max_tokens": self.max_tokens,

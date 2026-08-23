@@ -19,20 +19,19 @@ from evaluation.constants import (
     TIMEOUT_REWARD,
 )
 from evaluation.dataset import PuzzleExample
-from evaluation.protocol import MoveAgent, parse_tile
-from puzzle3.board import adjacent_tiles, apply_move, is_solved, move_for_tile
+from evaluation.protocol import PuzzleAgent, parse_tile
+from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_tile
 from puzzle3.solver import exact_distance
 
 
 @dataclass
 class StepResult:
     turn: int
-    board: tuple[int, ...]
-    legal_tiles: tuple[int, ...]
+    board: Board
+    legal_tiles: tuple[TileAction, ...]
     raw_response: str | None
-    tile: int | None
-    move: str | None
-    next_board: tuple[int, ...] | None
+    tile: TileAction | None
+    next_board: Board | None
     status: str
     response_metadata: dict[str, Any] | None = None
     reward: float = 0.0
@@ -46,8 +45,6 @@ class StepResult:
             "legal_tiles": list(self.legal_tiles),
             "raw_response": self.raw_response,
             "tile": self.tile,
-            # Internal physical direction retained only for transition diagnostics.
-            "move": self.move,
             "next_board": list(self.next_board)
             if self.next_board is not None
             else None,
@@ -65,7 +62,7 @@ class EpisodeResult:
     outcome: str
     reward: float
     moves_taken: int
-    final_board: tuple[int, ...]
+    final_board: Board
     steps: list[StepResult]
     rollout_id: int = 0
 
@@ -149,8 +146,8 @@ def solved_reward(optimal_length: int, moves_taken: int) -> float:
 
 
 def distance_progress_reward(
-    board: tuple[int, ...],
-    next_board: tuple[int, ...],
+    board: Board,
+    next_board: Board,
     *,
     weight: float = DISTANCE_PROGRESS_WEIGHT,
 ) -> float:
@@ -171,10 +168,10 @@ def _failed_episode(
     example: PuzzleExample,
     rollout_id: int,
     turn: int,
-    board: tuple[int, ...],
-    legal_tiles: tuple[int, ...],
+    board: Board,
+    legal_tiles: tuple[TileAction, ...],
     raw_response: str | None,
-    tile: int | None,
+    tile: TileAction | None,
     outcome: str,
     response_metadata: dict[str, Any] | None,
     steps: list[StepResult],
@@ -186,7 +183,6 @@ def _failed_episode(
             legal_tiles=legal_tiles,
             raw_response=raw_response,
             tile=tile,
-            move=None,
             next_board=None,
             status=outcome,
             response_metadata=response_metadata,
@@ -207,7 +203,7 @@ def _failed_episode(
 
 def evaluate_episode(
     example: PuzzleExample,
-    agent: MoveAgent,
+    agent: PuzzleAgent,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
     rollout_id: int = 0,
@@ -238,7 +234,7 @@ def evaluate_episode(
 
     for turn in range(1, max_turns + 1):
         available = adjacent_tiles(board)
-        raw_response = agent.next_move(board)
+        raw_response = agent.next_action(board)
         response_metadata = getattr(agent, "last_response_metadata", None)
         tile = parse_tile(raw_response)
         if tile is None:
@@ -260,8 +256,7 @@ def evaluate_episode(
                 steps=steps,
             )
 
-        move = move_for_tile(board, tile)
-        if move is None:
+        if tile not in available:
             return _failed_episode(
                 example=example,
                 rollout_id=rollout_id,
@@ -275,7 +270,7 @@ def evaluate_episode(
                 steps=steps,
             )
 
-        next_board = apply_move(board, move)
+        next_board = slide_tile(board, tile)
         solved = is_solved(next_board)
         progress_reward = distance_progress_reward(board, next_board)
         terminal_reward = solved_reward(example.optimal_length, turn) if solved else 0.0
@@ -286,7 +281,6 @@ def evaluate_episode(
                 legal_tiles=available,
                 raw_response=raw_response,
                 tile=tile,
-                move=move,
                 next_board=next_board,
                 status="solved" if solved else "valid",
                 response_metadata=response_metadata,
@@ -324,12 +318,12 @@ def evaluate_episode(
 
 def evaluate(
     examples: Iterable[PuzzleExample],
-    agent: MoveAgent | None = None,
+    agent: PuzzleAgent | None = None,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
     num_rollouts: int = 1,
     parallelism: int = 1,
-    agent_factory: Callable[[], MoveAgent] | None = None,
+    agent_factory: Callable[[], PuzzleAgent] | None = None,
 ) -> EvaluationResult:
     """Evaluate independent puzzle rollouts, optionally in parallel.
 

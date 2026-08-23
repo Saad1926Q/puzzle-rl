@@ -1,14 +1,21 @@
 from collections import deque
 from threading import Lock
 
-from puzzle3.board import GOAL, _get_opposite, apply_move, is_solved, legal_moves
+from puzzle3.board import (
+    GOAL,
+    Board,
+    TileAction,
+    adjacent_tiles,
+    is_solved,
+    slide_tile,
+)
 
 
-_DISTANCE_TABLE: dict[tuple[int, ...], int] | None = None
+_DISTANCE_TABLE: dict[Board, int] | None = None
 _DISTANCE_TABLE_LOCK = Lock()
 
 
-def _build_distance_table() -> dict[tuple[int, ...], int]:
+def _build_distance_table() -> dict[Board, int]:
     """Build exact distances from every reachable board to ``GOAL``."""
 
     distances = {GOAL: 0}
@@ -16,16 +23,16 @@ def _build_distance_table() -> dict[tuple[int, ...], int]:
     while queue:
         current = queue.popleft()
         next_distance = distances[current] + 1
-        for move in legal_moves(current):
-            nxt = apply_move(current, move)
+        for tile in adjacent_tiles(current):
+            nxt = slide_tile(current, tile)
             if nxt not in distances:
                 distances[nxt] = next_distance
                 queue.append(nxt)
     return distances
 
 
-def exact_distance(board: tuple[int, ...]) -> int:
-    """Return the exact optimal number of moves from ``board`` to ``GOAL``.
+def exact_distance(board: Board) -> int:
+    """Return the exact optimal number of actions from ``board`` to ``GOAL``.
 
     The complete reachable-state table is built lazily and shared by all
     rollouts. This avoids running a fresh BFS for every evaluated transition.
@@ -42,7 +49,7 @@ def exact_distance(board: tuple[int, ...]) -> int:
         raise ValueError("board is not a solvable 8-puzzle state") from exc
 
 
-def solve(board: tuple[int, ...]) -> list[str]:
+def solve(board: Board) -> list[TileAction]:
     """
     Solve an 8-puzzle board optimally using BFS.
 
@@ -55,41 +62,34 @@ def solve(board: tuple[int, ...]) -> list[str]:
         return []
 
     queue = deque([start])
-    parent: dict[tuple[int, ...], tuple[tuple[int, ...] | None, str | None]] = {
-        start: (None, None)
-    }
-    last_move_for: dict[tuple[int, ...], str | None] = {start: None}
+    parent: dict[Board, tuple[Board | None, TileAction | None]] = {start: (None, None)}
 
     while queue:
         current = queue.popleft()
-        last_move = last_move_for[current]
-        for move in legal_moves(current):
-            if last_move is not None and move == _get_opposite(last_move):
-                continue
-            nxt = apply_move(current, move)
+        for tile in adjacent_tiles(current):
+            nxt = slide_tile(current, tile)
             if nxt in parent:
                 continue
-            parent[nxt] = (current, move)
+            parent[nxt] = (current, tile)
             if nxt == GOAL:
                 return _reconstruct(parent, nxt)
-            last_move_for[nxt] = move
             queue.append(nxt)
 
     raise ValueError("board is not solvable")
 
 
 def _reconstruct(
-    parent: dict[tuple[int, ...], tuple[tuple[int, ...] | None, str | None]],
-    end: tuple[int, ...],
-) -> list[str]:
-    path = []
+    parent: dict[Board, tuple[Board | None, TileAction | None]],
+    end: Board,
+) -> list[TileAction]:
+    path: list[TileAction] = []
     current = end
     while True:
-        prev, move = parent[current]
+        prev, tile = parent[current]
         if prev is None:
             break
-        assert move is not None
-        path.append(move)
+        assert tile is not None
+        path.append(tile)
         current = prev
     path.reverse()
     return path

@@ -1,7 +1,7 @@
-from puzzle3.board import WIDTH
+from puzzle3.board import Board, WIDTH
 
 
-def render(board: tuple[int, ...]) -> str:
+def render(board: Board) -> str:
     """Render the board as a 3x3 text grid, with the blank tile shown as '_'."""
 
     rows = []

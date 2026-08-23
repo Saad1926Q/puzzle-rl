@@ -10,17 +10,18 @@ from typing import Any, Protocol
 from dotenv import load_dotenv
 
 from evaluation.constants import DEFAULT_API_KEY_ENV, SYSTEM_PROMPT
+from puzzle3.board import Board
 from puzzle3.render import render
 
 
-class MoveAgent(Protocol):
+class PuzzleAgent(Protocol):
     """Minimal interface required by the stateful evaluator."""
 
-    def next_move(self, board: tuple[int, ...]) -> str:
+    def next_action(self, board: Board) -> str:
         """Return one canonical tile-selection response for the current board."""
 
 
-def build_messages(board: tuple[int, ...]) -> list[dict[str, str]]:
+def build_messages(board: Board) -> list[dict[str, str]]:
     """Build a fresh request; no previous state or action is included."""
 
     board_text = "\n".join(

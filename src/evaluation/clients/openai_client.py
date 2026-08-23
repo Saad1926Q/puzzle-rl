@@ -15,9 +15,10 @@ from evaluation.constants import (
     DEFAULT_OPENAI_BASE_URL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_REASONING_EFFORT,
-    MOVE_TOOL,
+    SLIDE_TILE_TOOL,
 )
 from evaluation.protocol import build_messages, extract_responses_tool_tile, json_safe
+from puzzle3.board import Board
 
 
 class OpenAIAgent:
@@ -46,12 +47,12 @@ class OpenAIAgent:
         self.max_tokens = max_tokens
         self.last_response_metadata: dict[str, Any] = {}
 
-    def next_move(self, board: tuple[int, ...]) -> str:
+    def next_action(self, board: Board) -> str:
         tool = {
             "type": "function",
             "name": "slide_tile",
-            "description": MOVE_TOOL["function"]["description"],
-            "parameters": MOVE_TOOL["function"]["parameters"],
+            "description": SLIDE_TILE_TOOL["function"]["description"],
+            "parameters": SLIDE_TILE_TOOL["function"]["parameters"],
             "strict": True,
         }
         request: dict[str, Any] = {

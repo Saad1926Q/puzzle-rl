@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-VALID_MOVES = ("up", "down", "left", "right")
-VALID_MOVE_SET = frozenset(VALID_MOVES)
 
 DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_BASE_URL = "https://api.deepseek.com/beta"
@@ -24,7 +22,7 @@ blank. Call slide_tile exactly once with that tile's number. Do not submit the b
 non-adjacent tile, a plan, or a list of tiles. The board in the user message is the complete
 current state; do not assume or request history."""
 
-MOVE_TOOL = {
+SLIDE_TILE_TOOL = {
     "type": "function",
     "function": {
         "name": "slide_tile",

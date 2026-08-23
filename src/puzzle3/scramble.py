@@ -1,15 +1,16 @@
 import random
 
-from puzzle3.board import GOAL, apply_move, get_non_reversing_moves
+from puzzle3.board import Board, GOAL, TileAction, adjacent_tiles, slide_tile
 
 
-def scramble_board(depth: int, rng: random.Random) -> tuple[int, ...]:
-    """Scramble from GOAL by taking depth random non-immediate-reversing moves."""
+def scramble_board(depth: int, rng: random.Random) -> Board:
+    """Scramble from GOAL without immediately reversing an action."""
 
     board = GOAL
-    last_move = None
+    previous_tile: TileAction | None = None
     for _ in range(depth):
-        move = rng.choice(get_non_reversing_moves(board, last_move))
-        last_move = move
-        board = apply_move(board, move)
+        choices = [tile for tile in adjacent_tiles(board) if tile != previous_tile]
+        tile = rng.choice(choices)
+        previous_tile = tile
+        board = slide_tile(board, tile)
     return board

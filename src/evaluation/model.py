@@ -1,19 +1,20 @@
-"""Backward-compatible imports for evaluation clients and protocol helpers."""
+"""Evaluation client and protocol imports."""
 
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.openai_client import OpenAIAgent
 from evaluation.protocol import (
-    MoveAgent,
+    PuzzleAgent,
     build_messages,
     get_api_key,
     json_safe,
     parse_tile,
 )
 
+
 __all__ = [
     "DeepSeekAgent",
     "OpenAIAgent",
-    "MoveAgent",
+    "PuzzleAgent",
     "build_messages",
     "get_api_key",
     "json_safe",
