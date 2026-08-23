@@ -88,15 +88,42 @@ def get_non_reversing_moves(board: tuple[int, ...], last_move: str | None) -> li
     return [move for move in moves if move != _get_opposite(last_move)]
 
 
+def tile_for_move(board: tuple[int, ...], move: str) -> int:
+    """Return the numbered tile moved by a legal internal direction."""
+
+    blank_idx = get_blank_idx(board)
+    blank_r, blank_c = index_to_rc(blank_idx)
+    dr, dc = MOVE_DELTA[move]
+    return board[rc_to_index(blank_r + dr, blank_c + dc)]
+
+
+def adjacent_tiles(board: tuple[int, ...]) -> tuple[int, ...]:
+    """Return the numbered tiles that can slide into the blank."""
+
+    return tuple(tile_for_move(board, move) for move in legal_moves(board))
+
+
+def move_for_tile(board: tuple[int, ...], tile: int) -> str | None:
+    """Resolve an adjacent tile ID to its internal physical move direction."""
+
+    for move in legal_moves(board):
+        if tile_for_move(board, move) == tile:
+            return move
+    return None
+
+
 def apply_move(board: tuple[int, ...], move: str) -> tuple[int, ...]:
-    """Apply a legal move and return the resulting board."""
+    """Apply a legal internal move direction and return the resulting board."""
 
     new_board = list(board)
     blank_idx = get_blank_idx(board)
     blank_r, blank_c = index_to_rc(blank_idx)
     dr, dc = MOVE_DELTA[move]
     target_idx = rc_to_index(blank_r + dr, blank_c + dc)
-    new_board[blank_idx], new_board[target_idx] = new_board[target_idx], new_board[blank_idx]
+    new_board[blank_idx], new_board[target_idx] = (
+        new_board[target_idx],
+        new_board[blank_idx],
+    )
     return tuple(new_board)
 
 

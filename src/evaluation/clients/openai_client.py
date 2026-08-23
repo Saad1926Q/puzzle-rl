@@ -17,7 +17,7 @@ from evaluation.constants import (
     DEFAULT_REASONING_EFFORT,
     MOVE_TOOL,
 )
-from evaluation.protocol import build_messages, extract_responses_tool_move, json_safe
+from evaluation.protocol import build_messages, extract_responses_tool_tile, json_safe
 
 
 class OpenAIAgent:
@@ -49,7 +49,7 @@ class OpenAIAgent:
     def next_move(self, board: tuple[int, ...]) -> str:
         tool = {
             "type": "function",
-            "name": "submit_move",
+            "name": "slide_tile",
             "description": MOVE_TOOL["function"]["description"],
             "parameters": MOVE_TOOL["function"]["parameters"],
             "strict": True,
@@ -58,7 +58,7 @@ class OpenAIAgent:
             "model": self.model,
             "input": build_messages(board),
             "tools": [tool],
-            "tool_choice": {"type": "function", "name": "submit_move"},
+            "tool_choice": {"type": "function", "name": "slide_tile"},
             "parallel_tool_calls": False,
             "max_output_tokens": self.max_tokens,
             "store": False,
@@ -71,10 +71,12 @@ class OpenAIAgent:
             self.last_response_metadata = api_error_metadata(exc)
             raise
         incomplete = getattr(response, "status", None) == "incomplete"
-        move, tool_metadata = extract_responses_tool_move(response)
+        tile, tool_metadata = extract_responses_tool_tile(response)
         self.last_response_metadata = {
             "status": (
-                "truncated" if incomplete else ("tool_call" if move else "malformed")
+                "truncated"
+                if incomplete
+                else ("tool_call" if tile is not None else "malformed")
             ),
             "finish_reason": None,
             "incomplete_reason": getattr(
@@ -89,4 +91,8 @@ class OpenAIAgent:
         }
         if incomplete:
             return ""
-        return json.dumps({"move": move}) if move else (getattr(response, "output_text", "") or "")
+        return (
+            json.dumps({"tile": tile})
+            if tile is not None
+            else (getattr(response, "output_text", "") or "")
+        )

@@ -12,36 +12,50 @@ from evaluation.constants import (
     DEFAULT_MAX_TURNS,
     ILLEGAL_OR_MALFORMED_REWARD,
     MAX_TURNS,
+    DISTANCE_PROGRESS_WEIGHT,
+    MAX_PUZZLE_DISTANCE,
     SOLVED_BASE_REWARD,
     SOLVED_EFFICIENCY_WEIGHT,
     TIMEOUT_REWARD,
 )
 from evaluation.dataset import PuzzleExample
-from evaluation.protocol import MoveAgent, parse_move
-from puzzle3.board import apply_move, is_solved, legal_moves
+from evaluation.protocol import MoveAgent, parse_tile
+from puzzle3.board import adjacent_tiles, apply_move, is_solved, move_for_tile
+from puzzle3.solver import exact_distance
 
 
 @dataclass
 class StepResult:
     turn: int
     board: tuple[int, ...]
-    legal_moves: tuple[str, ...]
+    legal_tiles: tuple[int, ...]
     raw_response: str | None
+    tile: int | None
     move: str | None
     next_board: tuple[int, ...] | None
     status: str
     response_metadata: dict[str, Any] | None = None
+    reward: float = 0.0
+    progress_reward: float = 0.0
+    terminal_reward: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "turn": self.turn,
             "board": list(self.board),
-            "legal_moves": list(self.legal_moves),
+            "legal_tiles": list(self.legal_tiles),
             "raw_response": self.raw_response,
+            "tile": self.tile,
+            # Internal physical direction retained only for transition diagnostics.
             "move": self.move,
-            "next_board": list(self.next_board) if self.next_board is not None else None,
+            "next_board": list(self.next_board)
+            if self.next_board is not None
+            else None,
             "status": self.status,
             "response_metadata": self.response_metadata,
+            "reward": self.reward,
+            "progress_reward": self.progress_reward,
+            "terminal_reward": self.terminal_reward,
         }
 
 
@@ -86,9 +100,10 @@ class EvaluationResult:
         solved_examples = {
             episode.example.example_id for episode in self.episodes if episode.solved
         }
-        outcomes = {outcome: sum(e.outcome == outcome for e in self.episodes) for outcome in (
-            "solved", "illegal", "malformed", "truncated", "timeout"
-        )}
+        outcomes = {
+            outcome: sum(e.outcome == outcome for e in self.episodes)
+            for outcome in ("solved", "illegal", "malformed", "truncated", "timeout")
+        }
         return {
             "num_examples": num_examples,
             "num_rollouts": self.num_rollouts,
@@ -106,15 +121,22 @@ class EvaluationResult:
             # pass@k is the fraction of distinct puzzles solved by at least one
             # of the k independent rollouts.
             "pass@k": len(solved_examples) / num_examples if num_examples else 0.0,
-            "mean_reward": sum(e.reward for e in self.episodes) / count if count else 0.0,
-            "mean_moves_taken": sum(e.moves_taken for e in self.episodes) / count if count else 0.0,
+            "mean_reward": sum(e.reward for e in self.episodes) / count
+            if count
+            else 0.0,
+            "mean_moves_taken": sum(e.moves_taken for e in self.episodes) / count
+            if count
+            else 0.0,
             "mean_solved_moves": (
                 sum(e.moves_taken for e in solved) / len(solved) if solved else 0.0
             ),
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary(), "episodes": [e.to_dict() for e in self.episodes]}
+        return {
+            "summary": self.summary(),
+            "episodes": [e.to_dict() for e in self.episodes],
+        }
 
 
 def solved_reward(optimal_length: int, moves_taken: int) -> float:
@@ -126,6 +148,63 @@ def solved_reward(optimal_length: int, moves_taken: int) -> float:
     return SOLVED_BASE_REWARD + SOLVED_EFFICIENCY_WEIGHT * efficiency
 
 
+def distance_progress_reward(
+    board: tuple[int, ...],
+    next_board: tuple[int, ...],
+    *,
+    weight: float = DISTANCE_PROGRESS_WEIGHT,
+) -> float:
+    """Reward a valid transition according to its exact-distance improvement."""
+
+    distance_improvement = exact_distance(board) - exact_distance(next_board)
+    return weight * distance_improvement / MAX_PUZZLE_DISTANCE
+
+
+def _episode_reward(steps: list[StepResult]) -> float:
+    """Aggregate per-transition rewards into the episode return."""
+
+    return sum(step.reward for step in steps)
+
+
+def _failed_episode(
+    *,
+    example: PuzzleExample,
+    rollout_id: int,
+    turn: int,
+    board: tuple[int, ...],
+    legal_tiles: tuple[int, ...],
+    raw_response: str | None,
+    tile: int | None,
+    outcome: str,
+    response_metadata: dict[str, Any] | None,
+    steps: list[StepResult],
+) -> EpisodeResult:
+    steps.append(
+        StepResult(
+            turn=turn,
+            board=board,
+            legal_tiles=legal_tiles,
+            raw_response=raw_response,
+            tile=tile,
+            move=None,
+            next_board=None,
+            status=outcome,
+            response_metadata=response_metadata,
+            reward=ILLEGAL_OR_MALFORMED_REWARD,
+            terminal_reward=ILLEGAL_OR_MALFORMED_REWARD,
+        )
+    )
+    return EpisodeResult(
+        example=example,
+        outcome=outcome,
+        reward=_episode_reward(steps),
+        moves_taken=turn - 1,
+        final_board=board,
+        steps=steps,
+        rollout_id=rollout_id,
+    )
+
+
 def evaluate_episode(
     example: PuzzleExample,
     agent: MoveAgent,
@@ -133,77 +212,113 @@ def evaluate_episode(
     max_turns: int = DEFAULT_MAX_TURNS,
     rollout_id: int = 0,
 ) -> EpisodeResult:
-    """Run one puzzle with environment-authoritative state and scoring."""
+    """Run one puzzle with environment-authoritative distance-progress scoring.
 
-    if max_turns <= 0 or max_turns > MAX_TURNS:
+    Invalid responses receive only the terminal penalty because they do not produce
+    a valid successor state. Every valid move is rewarded for exact-distance progress;
+    solving and timeout rewards are attached to the terminal transition so that the
+    per-step rewards sum exactly to the episode return.
+    """
+
+    if not 1 <= max_turns <= MAX_TURNS:
         raise ValueError(f"max_turns must be between 1 and {MAX_TURNS}")
 
     board = example.board
     steps: list[StepResult] = []
     if is_solved(board):
-        return EpisodeResult(example, "solved", 1.0, 0, board, steps, rollout_id)
+        return EpisodeResult(
+            example=example,
+            outcome="solved",
+            reward=solved_reward(example.optimal_length, 0),
+            moves_taken=0,
+            final_board=board,
+            steps=steps,
+            rollout_id=rollout_id,
+        )
 
     for turn in range(1, max_turns + 1):
-        available = tuple(legal_moves(board))
+        available = adjacent_tiles(board)
         raw_response = agent.next_move(board)
         response_metadata = getattr(agent, "last_response_metadata", None)
-        move = parse_move(raw_response)
-        if move is None:
+        tile = parse_tile(raw_response)
+        if tile is None:
             outcome = (
                 "truncated"
                 if response_metadata and response_metadata.get("truncated")
                 else "malformed"
             )
-            steps.append(
-                StepResult(
-                    turn, board, available, raw_response, None, None, outcome,
-                    response_metadata,
-                )
+            return _failed_episode(
+                example=example,
+                rollout_id=rollout_id,
+                turn=turn,
+                board=board,
+                legal_tiles=available,
+                raw_response=raw_response,
+                tile=None,
+                outcome=outcome,
+                response_metadata=response_metadata,
+                steps=steps,
             )
-            return EpisodeResult(
-                example, outcome, ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps,
-                rollout_id,
-            )
-        if move not in available:
-            steps.append(
-                StepResult(
-                    turn, board, available, raw_response, move, None, "illegal",
-                    response_metadata,
-                )
-            )
-            return EpisodeResult(
-                example, "illegal", ILLEGAL_OR_MALFORMED_REWARD, turn - 1, board, steps,
-                rollout_id,
+
+        move = move_for_tile(board, tile)
+        if move is None:
+            return _failed_episode(
+                example=example,
+                rollout_id=rollout_id,
+                turn=turn,
+                board=board,
+                legal_tiles=available,
+                raw_response=raw_response,
+                tile=tile,
+                outcome="illegal",
+                response_metadata=response_metadata,
+                steps=steps,
             )
 
         next_board = apply_move(board, move)
         solved = is_solved(next_board)
+        progress_reward = distance_progress_reward(board, next_board)
+        terminal_reward = solved_reward(example.optimal_length, turn) if solved else 0.0
         steps.append(
             StepResult(
-                turn,
-                board,
-                available,
-                raw_response,
-                move,
-                next_board,
-                "solved" if solved else "valid",
-                response_metadata,
+                turn=turn,
+                board=board,
+                legal_tiles=available,
+                raw_response=raw_response,
+                tile=tile,
+                move=move,
+                next_board=next_board,
+                status="solved" if solved else "valid",
+                response_metadata=response_metadata,
+                reward=progress_reward + terminal_reward,
+                progress_reward=progress_reward,
+                terminal_reward=terminal_reward,
             )
         )
         board = next_board
         if solved:
             return EpisodeResult(
-                example,
-                "solved",
-                solved_reward(example.optimal_length, turn),
-                turn,
-                board,
-                steps,
-                rollout_id,
+                example=example,
+                outcome="solved",
+                reward=_episode_reward(steps),
+                moves_taken=turn,
+                final_board=board,
+                steps=steps,
+                rollout_id=rollout_id,
             )
 
+    # Attach the timeout penalty to the final valid transition. This keeps the
+    # serialized per-step rewards aligned with the aggregate episode return.
+    steps[-1].reward += TIMEOUT_REWARD
+    steps[-1].terminal_reward += TIMEOUT_REWARD
     return EpisodeResult(
-        example, "timeout", TIMEOUT_REWARD, max_turns, board, steps, rollout_id
+        example=example,
+        outcome="timeout",
+        reward=_episode_reward(steps),
+        moves_taken=max_turns,
+        final_board=board,
+        steps=steps,
+        rollout_id=rollout_id,
     )
 
 

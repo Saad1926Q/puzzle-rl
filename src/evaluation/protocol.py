@@ -9,12 +9,7 @@ from typing import Any, Protocol
 
 from dotenv import load_dotenv
 
-from evaluation.constants import (
-    DEFAULT_API_KEY_ENV,
-    MOVE_TAG_RE,
-    SYSTEM_PROMPT,
-    VALID_MOVE_SET,
-)
+from evaluation.constants import DEFAULT_API_KEY_ENV, SYSTEM_PROMPT
 from puzzle3.render import render
 
 
@@ -22,7 +17,7 @@ class MoveAgent(Protocol):
     """Minimal interface required by the stateful evaluator."""
 
     def next_move(self, board: tuple[int, ...]) -> str:
-        """Return one canonical move response for the current board."""
+        """Return one canonical tile-selection response for the current board."""
 
 
 def build_messages(board: tuple[int, ...]) -> list[dict[str, str]]:
@@ -32,7 +27,7 @@ def build_messages(board: tuple[int, ...]) -> list[dict[str, str]]:
         (
             "Current board (0 is the blank):",
             render(board),
-            "\nChoose the single next move now.",
+            "\nChoose the single adjacent numbered tile to slide into the blank now.",
         )
     )
     return [
@@ -41,22 +36,22 @@ def build_messages(board: tuple[int, ...]) -> list[dict[str, str]]:
     ]
 
 
-def parse_move(response: str | None) -> str | None:
-    """Extract a move from legacy XML or canonical JSON text."""
+def _valid_tile(value: Any) -> int | None:
+    """Return a valid numbered tile ID, explicitly excluding booleans."""
+
+    return value if type(value) is int and 1 <= value <= 8 else None
+
+
+def parse_tile(response: str | None) -> int | None:
+    """Extract one numbered tile ID from canonical JSON text."""
 
     if not isinstance(response, str):
         return None
-    matches = MOVE_TAG_RE.findall(response)
-    if len(matches) == 1:
-        return matches[0].lower()
     try:
         payload = json.loads(response)
     except (json.JSONDecodeError, TypeError):
         return None
-    if isinstance(payload, dict) and isinstance(payload.get("move"), str):
-        move = payload["move"].strip().lower()
-        return move if move in VALID_MOVE_SET else None
-    return None
+    return _valid_tile(payload.get("tile") if isinstance(payload, dict) else None)
 
 
 def get_api_key(
@@ -89,33 +84,33 @@ def json_safe(value: Any) -> Any:
     return str(value)
 
 
-def extract_chat_tool_move(message: Any) -> tuple[str | None, dict[str, Any]]:
-    """Extract exactly one function call from a Chat Completions message."""
+def _parse_tool_tile(name: Any, arguments: Any) -> int | None:
+    if name != "slide_tile" or not isinstance(arguments, str):
+        return None
+    try:
+        payload = json.loads(arguments)
+    except json.JSONDecodeError:
+        return None
+    return _valid_tile(payload.get("tile") if isinstance(payload, dict) else None)
+
+
+def extract_chat_tool_tile(message: Any) -> tuple[int | None, dict[str, Any]]:
+    """Extract exactly one tile call from a Chat Completions message."""
 
     calls = getattr(message, "tool_calls", None) or []
     metadata: dict[str, Any] = {"tool_call_count": len(calls)}
     if len(calls) != 1:
         metadata["invalid_tool_call_count"] = True
         return None, metadata
-    call = calls[0]
-    function = getattr(call, "function", None)
+    function = getattr(calls[0], "function", None)
     name = getattr(function, "name", None)
     arguments = getattr(function, "arguments", None)
     metadata.update({"tool_name": name, "tool_arguments": arguments})
-    if name != "submit_move" or not isinstance(arguments, str):
-        return None, metadata
-    try:
-        payload = json.loads(arguments)
-    except json.JSONDecodeError:
-        return None, metadata
-    move = payload.get("move") if isinstance(payload, dict) else None
-    if not isinstance(move, str) or move.lower() not in VALID_MOVE_SET:
-        return None, metadata
-    return move.lower(), metadata
+    return _parse_tool_tile(name, arguments), metadata
 
 
-def extract_responses_tool_move(response: Any) -> tuple[str | None, dict[str, Any]]:
-    """Extract exactly one function call from a Responses API response."""
+def extract_responses_tool_tile(response: Any) -> tuple[int | None, dict[str, Any]]:
+    """Extract exactly one tile call from a Responses API response."""
 
     calls = [
         item
@@ -130,13 +125,4 @@ def extract_responses_tool_move(response: Any) -> tuple[str | None, dict[str, An
     name = getattr(call, "name", None)
     arguments = getattr(call, "arguments", None)
     metadata.update({"tool_name": name, "tool_arguments": arguments})
-    if name != "submit_move" or not isinstance(arguments, str):
-        return None, metadata
-    try:
-        payload = json.loads(arguments)
-    except json.JSONDecodeError:
-        return None, metadata
-    move = payload.get("move") if isinstance(payload, dict) else None
-    if not isinstance(move, str) or move.lower() not in VALID_MOVE_SET:
-        return None, metadata
-    return move.lower(), metadata
+    return _parse_tool_tile(name, arguments), metadata

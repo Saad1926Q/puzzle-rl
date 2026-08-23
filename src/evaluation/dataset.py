@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from datasets import load_dataset
@@ -49,7 +51,9 @@ def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
         raise DatasetError(f"{example_id}: board must be a permutation of 0..8")
 
     try:
-        optimal_moves = tuple(str(move).strip().lower() for move in row["optimal_moves"])
+        optimal_moves = tuple(
+            str(move).strip().lower() for move in row["optimal_moves"]
+        )
         optimal_length = int(row["optimal_length"])
     except (KeyError, TypeError, ValueError) as exc:
         raise DatasetError(
@@ -69,6 +73,43 @@ def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
     return PuzzleExample(example_id, board, optimal_moves, optimal_length, metadata)
 
 
+def _load_rows(
+    dataset: str,
+    *,
+    config: str,
+    split: str,
+) -> Any:
+    """Load rows from a local JSONL subset or from Hugging Face."""
+
+    local_path = Path(dataset)
+    if not local_path.is_file():
+        return load_dataset(dataset, name=config, split=split)
+    if local_path.suffix == ".parquet":
+        return load_dataset(
+            "parquet",
+            data_files={split: str(local_path)},
+            split=split,
+        )
+    if local_path.suffix != ".jsonl":
+        raise DatasetError(
+            f"local dataset must be a .jsonl or .parquet file: {dataset}"
+        )
+
+    rows = []
+    with local_path.open(encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise DatasetError(f"{dataset}:{line_number}: invalid JSON") from exc
+            if not isinstance(row, dict):
+                raise DatasetError(f"{dataset}:{line_number}: row must be an object")
+            rows.append(row)
+    return rows
+
+
 def load_examples(
     *,
     dataset: str = DEFAULT_DATASET,
@@ -77,12 +118,14 @@ def load_examples(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[PuzzleExample]:
-    """Load the full split, or a deterministic slice, via Hugging Face ``datasets``."""
+    """Load a deterministic slice from Hugging Face or a local JSONL/Parquet file."""
 
     if (limit is not None and limit <= 0) or offset < 0:
-        raise ValueError("limit must be positive when provided and offset must be non-negative")
+        raise ValueError(
+            "limit must be positive when provided and offset must be non-negative"
+        )
 
-    rows = load_dataset(dataset, name=config, split=split)
+    rows = _load_rows(dataset, config=config, split=split)
     end = len(rows) if limit is None else min(offset + limit, len(rows))
     if limit is not None and end - offset != limit:
         raise DatasetError(

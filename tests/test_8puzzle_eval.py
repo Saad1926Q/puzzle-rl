@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 import pytest
+from datasets import Dataset
 
 from evaluation.dataset import PuzzleExample, load_examples
-from evaluation.evaluator import evaluate, evaluate_episode, solved_reward
+from evaluation.evaluator import (
+    evaluate,
+    evaluate_episode,
+    distance_progress_reward,
+    solved_reward,
+)
 from evaluation.clients.deepseek import DeepSeekAgent
+from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
-from evaluation.protocol import build_messages, get_api_key, parse_move
+from evaluation.protocol import build_messages, get_api_key, parse_tile
+from puzzle3.board import GOAL
+from puzzle3.solver import exact_distance
 
 
 @dataclass
@@ -23,12 +33,12 @@ def example(board: tuple[int, ...], optimal_length: int = 1) -> PuzzleExample:
     return PuzzleExample("test", board, tuple(), optimal_length, {})
 
 
-def test_parser_requires_one_move_tag() -> None:
-    assert parse_move("<move> LEFT </move>") == "left"
-    assert parse_move("reasoning\n<move>up</move>") == "up"
-    assert parse_move("left") is None
-    assert parse_move("<move>up</move><move>left</move>") is None
-    assert parse_move("<move>jump</move>") is None
+def test_parser_requires_one_valid_tile() -> None:
+    assert parse_tile('{"tile": 8}') == 8
+    assert parse_tile('{"tile": 0}') is None
+    assert parse_tile('{"tile": 9}') is None
+    assert parse_tile('{"tile": true}') is None
+    assert parse_tile('{"move": "left"}') is None
 
 
 def test_messages_contain_current_board_but_no_history() -> None:
@@ -38,26 +48,32 @@ def test_messages_contain_current_board_but_no_history() -> None:
     assert "history" not in messages[1]["content"].lower()
 
 
-def _fake_response(*, content="", tool_calls=None, finish_reason="tool_calls", reasoning_content=None):
+def _fake_response(
+    *, content="", tool_calls=None, finish_reason="tool_calls", reasoning_content=None
+):
     message = type(
         "Message",
         (),
-        {"content": content, "tool_calls": tool_calls, "reasoning_content": reasoning_content},
+        {
+            "content": content,
+            "tool_calls": tool_calls,
+            "reasoning_content": reasoning_content,
+        },
     )()
     choice = type("Choice", (), {"message": message, "finish_reason": finish_reason})()
     return type("Response", (), {"choices": [choice], "usage": None})()
 
 
-def _fake_tool_call(arguments='{"move":"left"}', name="submit_move"):
+def _fake_tool_call(arguments='{"tile":8}', name="slide_tile"):
     function = type("Function", (), {"name": name, "arguments": arguments})()
     return [type("ToolCall", (), {"function": function})()]
 
 
-def _fake_responses_response(*, arguments='{"move":"left"}', status="completed"):
+def _fake_responses_response(*, arguments='{"tile":8}', status="completed"):
     call = type(
         "FunctionCall",
         (),
-        {"type": "function_call", "name": "submit_move", "arguments": arguments},
+        {"type": "function_call", "name": "slide_tile", "arguments": arguments},
     )()
     incomplete = type("Incomplete", (), {"reason": "max_output_tokens"})()
     return type(
@@ -80,25 +96,60 @@ def test_deepseek_strict_tool_call_is_canonicalized() -> None:
             return _fake_response(tool_calls=_fake_tool_call())
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
-    assert parse_move(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == "left"
-    assert completions.kwargs["tool_choice"]["function"]["name"] == "submit_move"
+    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert completions.kwargs["tool_choice"]["function"]["name"] == "slide_tile"
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert agent.last_response_metadata["status"] == "tool_call"
+
+
+def test_glm_tool_call_uses_zai_parameters() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call('{"tile":3}'))
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = GLMAgent(api_key="not-used", client=client, thinking=True)
+    assert parse_tile(agent.next_move((1, 2, 0, 4, 5, 3, 7, 8, 6))) == 3
+    assert completions.kwargs["tool_choice"] == "auto"
+    assert completions.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in completions.kwargs
+    assert completions.kwargs["max_tokens"] == 4096
+
+
+def test_glm_disabled_thinking_is_explicit() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = GLMAgent(api_key="not-used", client=client, thinking=False)
+    agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_openai_responses_tool_call_uses_responses_parameters() -> None:
     class Responses:
         def create(self, **kwargs):
             self.kwargs = kwargs
-            return _fake_responses_response(arguments='{"move":"right"}')
+            return _fake_responses_response(arguments='{"tile":6}')
 
     responses = Responses()
     client = type("Client", (), {"responses": responses})()
     agent = OpenAIAgent(api_key="not-used", client=client, thinking=True)
-    assert parse_move(agent.next_move((1, 2, 3, 4, 5, 0, 7, 8, 6))) == "right"
-    assert responses.kwargs["tool_choice"]["name"] == "submit_move"
+    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 0, 7, 8, 6))) == 6
+    assert responses.kwargs["tool_choice"]["name"] == "slide_tile"
     assert responses.kwargs["parallel_tool_calls"] is False
     assert responses.kwargs["max_output_tokens"] == 4096
     assert responses.kwargs["reasoning"]["effort"] == "low"
@@ -123,14 +174,16 @@ def test_deepseek_thinking_mode_reads_tool_call_and_reasoning_metadata() -> None
         def create(self, **kwargs):
             self.kwargs = kwargs
             return _fake_response(
-                tool_calls=_fake_tool_call('{"move":"up"}'),
+                tool_calls=_fake_tool_call('{"tile":3}'),
                 reasoning_content="reason about the board",
             )
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=True)
-    assert parse_move(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == "up"
+    assert parse_tile(agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 3
     assert completions.kwargs["tool_choice"] == "auto"
     assert agent.last_response_metadata["reasoning_content_length"] > 0
 
@@ -139,11 +192,13 @@ def test_deepseek_multiple_tool_calls_are_malformed() -> None:
     class Completions:
         def create(self, **kwargs):
             return _fake_response(
-                tool_calls=_fake_tool_call('{"move":"left"}') + _fake_tool_call('{"move":"up"}')
+                tool_calls=_fake_tool_call('{"tile":8}') + _fake_tool_call('{"tile":3}')
             )
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
     assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["tool_call_count"] == 2
@@ -154,11 +209,13 @@ def test_deepseek_truncated_tool_call_is_not_accepted() -> None:
     class Completions:
         def create(self, **kwargs):
             return _fake_response(
-                tool_calls=_fake_tool_call('{"move":"left"}'), finish_reason="length"
+                tool_calls=_fake_tool_call('{"tile":8}'), finish_reason="length"
             )
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
     assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["truncated"] is True
@@ -168,10 +225,17 @@ def test_deepseek_truncated_tool_call_is_not_accepted() -> None:
 def test_deepseek_empty_or_truncated_response_is_diagnosed() -> None:
     class Completions:
         def create(self, **kwargs):
-            return _fake_response(content="", tool_calls=None, finish_reason="length", reasoning_content="partial")
+            return _fake_response(
+                content="",
+                tool_calls=None,
+                finish_reason="length",
+                reasoning_content="partial",
+            )
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=True)
     assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
     assert agent.last_response_metadata["status"] == "truncated"
@@ -182,13 +246,15 @@ def test_deepseek_empty_or_truncated_response_is_diagnosed() -> None:
 def test_deepseek_malformed_tool_arguments_are_diagnosed() -> None:
     class Completions:
         def create(self, **kwargs):
-            return _fake_response(tool_calls=_fake_tool_call('{"move":"diagonal"}'))
+            return _fake_response(tool_calls=_fake_tool_call('{"tile":0}'))
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
     assert agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8)) == ""
-    assert agent.last_response_metadata["tool_name"] == "submit_move"
+    assert agent.last_response_metadata["tool_name"] == "slide_tile"
     assert agent.last_response_metadata["status"] == "malformed"
 
 
@@ -198,7 +264,9 @@ def test_deepseek_provider_error_is_not_relabelled_as_malformed() -> None:
             raise RuntimeError("provider unavailable")
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client, thinking=False)
     with pytest.raises(RuntimeError, match="provider unavailable"):
         agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
@@ -214,12 +282,18 @@ def test_deepseek_adapter_starts_a_fresh_request_each_turn() -> None:
             self.calls.append(kwargs)
             response = type("Response", (), {})()
             response.choices = [
-                type("Choice", (), {"message": type("Message", (), {"content": "<move>left</move>"})()})()
+                type(
+                    "Choice",
+                    (),
+                    {"message": type("Message", (), {"content": '{"tile": 8}'})()},
+                )()
             ]
             return response
 
     completions = Completions()
-    client = type("Client", (), {"chat": type("Chat", (), {"completions": completions})()})()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
     agent = DeepSeekAgent(api_key="not-used", client=client)
     agent.next_move((1, 2, 3, 4, 5, 6, 7, 0, 8))
     agent.next_move((1, 2, 3, 4, 5, 6, 0, 7, 8))
@@ -227,6 +301,46 @@ def test_deepseek_adapter_starts_a_fresh_request_each_turn() -> None:
     assert len(completions.calls[0]["messages"]) == 2
     assert completions.calls[0]["messages"][1] != completions.calls[1]["messages"][1]
     assert all(len(call["messages"]) == 2 for call in completions.calls)
+
+
+def test_local_jsonl_eval_subset_is_supported(tmp_path) -> None:
+    path = tmp_path / "eval.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+                "optimal_moves": ["left"],
+                "optimal_length": 1,
+                "bucket": "easy",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tasks = load_examples(dataset=str(path))
+    assert len(tasks) == 1
+    assert tasks[0].board == (1, 2, 3, 4, 5, 6, 7, 0, 8)
+    assert tasks[0].metadata["bucket"] == "easy"
+
+
+def test_local_parquet_eval_subset_is_supported(tmp_path) -> None:
+    path = tmp_path / "eval.parquet"
+    Dataset.from_list(
+        [
+            {
+                "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+                "optimal_moves": ["left"],
+                "optimal_length": 1,
+                "bucket": "easy",
+            }
+        ]
+    ).to_parquet(str(path))
+
+    tasks = load_examples(dataset=str(path))
+
+    assert len(tasks) == 1
+    assert tasks[0].board == (1, 2, 3, 4, 5, 6, 7, 0, 8)
+    assert tasks[0].metadata["bucket"] == "easy"
 
 
 def test_dotenv_key_is_supported(tmp_path, monkeypatch) -> None:
@@ -249,20 +363,48 @@ def test_solved_reward_is_bounded_and_efficiency_sensitive() -> None:
     assert solved_reward(4, 100) == 0.808
 
 
-def test_solved_episode_uses_tile_move_convention() -> None:
+def test_exact_distance_is_goal_oriented() -> None:
+    one_move = (1, 2, 3, 4, 5, 6, 7, 0, 8)
+    hardest = (8, 6, 7, 2, 5, 4, 3, 0, 1)
+    assert exact_distance(GOAL) == 0
+    assert exact_distance(one_move) == 1
+    assert exact_distance(hardest) == 31
+
+
+def test_distance_progress_rewards_progress_and_penalizes_backtracking() -> None:
+    one_move = (1, 2, 3, 4, 5, 6, 7, 0, 8)
+    farther = (1, 2, 3, 4, 5, 6, 0, 7, 8)
+    closer = distance_progress_reward(one_move, GOAL)
+    farther_reward = distance_progress_reward(one_move, farther)
+    assert closer == pytest.approx(0.25 / 31)
+    assert farther_reward == pytest.approx(-0.25 / 31)
+    assert closer + farther_reward == pytest.approx(0.0)
+
+
+def test_solved_episode_includes_terminal_and_progress_rewards() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
-    result = evaluate_episode(task, SequenceAgent(["<move>left</move>"]))
+    result = evaluate_episode(task, SequenceAgent(['{"tile": 8}']))
     assert result.outcome == "solved"
-    assert result.reward == 1.0
+    assert result.reward == pytest.approx(1.0 + 0.25 / 31)
+    assert result.steps[0].terminal_reward == pytest.approx(1.0)
+    assert result.steps[0].progress_reward == pytest.approx(0.25 / 31)
+    assert result.steps[0].legal_tiles == (5, 8, 7)
+    assert result.steps[0].tile == 8
+    assert result.steps[0].move == "left"
     assert result.moves_taken == 1
     assert result.final_board == (1, 2, 3, 4, 5, 6, 7, 8, 0)
 
 
 def test_illegal_move_ends_immediately_with_negative_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
-    result = evaluate_episode(task, SequenceAgent(["<move>up</move>"]))
+    result = evaluate_episode(task, SequenceAgent(['{"tile": 1}']))
     assert result.outcome == "illegal"
-    assert result.reward == -0.1
+    assert result.reward == -1.0
+    assert result.steps[0].progress_reward == 0.0
+    assert result.steps[0].terminal_reward == -1.0
+    assert result.steps[0].legal_tiles == (5, 8, 7)
+    assert result.steps[0].tile == 1
+    assert result.steps[0].move is None
     assert result.moves_taken == 0
     assert len(result.steps) == 1
 
@@ -271,7 +413,8 @@ def test_malformed_response_ends_immediately_with_negative_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     result = evaluate_episode(task, SequenceAgent(["I choose left"]))
     assert result.outcome == "malformed"
-    assert result.reward == -0.1
+    assert result.reward == -1.0
+    assert result.steps[0].progress_reward == 0.0
     assert result.moves_taken == 0
 
 
@@ -286,7 +429,8 @@ def test_truncated_response_is_reported_separately() -> None:
     result = evaluate_episode(task, TruncatedAgent())
     assert result.outcome == "truncated"
     assert result.steps[0].status == "truncated"
-    assert result.reward == -0.1
+    assert result.reward == -1.0
+    assert result.steps[0].progress_reward == 0.0
     assert evaluate([task], TruncatedAgent()).summary()["truncated"] == 1
 
 
@@ -297,7 +441,7 @@ def test_multiple_rollouts_report_rollout_metrics_and_pass_at_k() -> None:
 
         def next_move(self, board: tuple[int, ...]) -> str:
             self.calls += 1
-            return "bad" if self.calls == 1 else "<move>left</move>"
+            return "bad" if self.calls == 1 else '{"tile": 8}'
 
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     result = evaluate([task], FirstFailsThenSolves(), num_rollouts=3)
@@ -325,7 +469,7 @@ def test_parallel_rollouts_preserve_order_and_isolate_agents() -> None:
             self.last_response_metadata = {"worker_id": worker_id}
 
         def next_move(self, board: tuple[int, ...]) -> str:
-            return "<move>left</move>"
+            return '{"tile": 8}'
 
     def factory() -> WorkerAgent:
         nonlocal created
@@ -338,31 +482,33 @@ def test_parallel_rollouts_preserve_order_and_isolate_agents() -> None:
         [task, task], num_rollouts=2, parallelism=2, agent_factory=factory
     )
     assert len(result.episodes) == 4
-    assert [(episode.example.example_id, episode.rollout_id) for episode in result.episodes] == [
-        ("test", 0), ("test", 1), ("test", 0), ("test", 1)
-    ]
-    assert {episode.steps[0].response_metadata["worker_id"] for episode in result.episodes} == {
-        0, 1, 2, 3
-    }
+    assert [
+        (episode.example.example_id, episode.rollout_id) for episode in result.episodes
+    ] == [("test", 0), ("test", 1), ("test", 0), ("test", 1)]
+    assert {
+        episode.steps[0].response_metadata["worker_id"] for episode in result.episodes
+    } == {0, 1, 2, 3}
 
 
 def test_parallelism_requires_agent_factory() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     with pytest.raises(ValueError, match="agent_factory is required"):
-        evaluate([task], SequenceAgent(["<move>left</move>"]), parallelism=2)
+        evaluate([task], SequenceAgent(['{"tile": 8}']), parallelism=2)
 
 
 def test_num_rollouts_must_be_positive() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     with pytest.raises(ValueError, match="num_rollouts must be positive"):
-        evaluate([task], SequenceAgent(["<move>left</move>"]), num_rollouts=0)
+        evaluate([task], SequenceAgent(['{"tile": 8}']), num_rollouts=0)
 
 
-def test_valid_unsolved_trajectory_at_limit_gets_zero() -> None:
+def test_valid_unsolved_trajectory_at_limit_gets_progress_and_timeout_penalty() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
-    result = evaluate_episode(task, SequenceAgent(["<move>right</move>"]), max_turns=1)
+    result = evaluate_episode(task, SequenceAgent(['{"tile": 7}']), max_turns=1)
     assert result.outcome == "timeout"
-    assert result.reward == 0.0
+    assert result.reward == pytest.approx(-0.25 - 0.25 / 31)
+    assert result.steps[0].progress_reward == pytest.approx(-0.25 / 31)
+    assert result.steps[0].terminal_reward == pytest.approx(-0.25)
     assert result.moves_taken == 1
 
 
@@ -388,12 +534,13 @@ def test_harness_runs_ten_huggingface_dataset_examples(monkeypatch) -> None:
     # Use a fresh oracle that derives the next move from the current board by BFS;
     # this makes the smoke test independent of any model or credentials.
     from puzzle3.solver import solve
+    from puzzle3.board import tile_for_move
 
     class BfsOracle:
         def next_move(self, board: tuple[int, ...]) -> str:
-            return f"<move>{solve(board)[0]}</move>"
+            return json.dumps({"tile": tile_for_move(board, solve(board)[0])})
 
     result = evaluate(tasks, BfsOracle())
     assert len(result.episodes) == 10
     assert result.summary()["solved"] == 10
-    assert result.summary()["mean_reward"] == 1.0
+    assert result.summary()["mean_reward"] == pytest.approx(1.0 + 0.25 / 31)

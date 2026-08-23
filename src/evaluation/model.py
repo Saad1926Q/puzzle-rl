@@ -7,7 +7,7 @@ from evaluation.protocol import (
     build_messages,
     get_api_key,
     json_safe,
-    parse_move,
+    parse_tile,
 )
 
 __all__ = [
@@ -17,5 +17,5 @@ __all__ = [
     "build_messages",
     "get_api_key",
     "json_safe",
-    "parse_move",
+    "parse_tile",
 ]

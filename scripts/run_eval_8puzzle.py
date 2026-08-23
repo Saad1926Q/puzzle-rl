@@ -13,12 +13,17 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from evaluation.constants import (
+    ACTION_INTERFACE,
     DEFAULT_API_KEY_ENV,
     DEFAULT_BASE_URL,
+    DEFAULT_GLM_API_KEY_ENV,
+    DEFAULT_GLM_BASE_URL,
+    DEFAULT_GLM_MODEL,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_MODEL,
@@ -27,13 +32,51 @@ from evaluation.constants import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_THINKING,
+    DISTANCE_PROGRESS_WEIGHT,
+    MAX_PUZZLE_DISTANCE,
     MAX_TURNS,
+    REWARD_SCHEME,
 )
 from evaluation.dataset import load_examples
 from evaluation.evaluator import EvaluationResult, evaluate
 from evaluation.clients.deepseek import DeepSeekAgent
+from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
 from evaluation.protocol import get_api_key
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    agent_class: type[DeepSeekAgent] | type[GLMAgent] | type[OpenAIAgent]
+    default_model: str
+    default_base_url: str
+    default_api_key_env: str
+    default_output: str
+
+
+PROVIDERS = {
+    "deepseek": ProviderConfig(
+        DeepSeekAgent,
+        DEFAULT_MODEL,
+        DEFAULT_BASE_URL,
+        DEFAULT_API_KEY_ENV,
+        "results_8puzzle_deepseek_v4_flash.json",
+    ),
+    "glm": ProviderConfig(
+        GLMAgent,
+        DEFAULT_GLM_MODEL,
+        DEFAULT_GLM_BASE_URL,
+        DEFAULT_GLM_API_KEY_ENV,
+        "results_8puzzle_glm_4_5_air.json",
+    ),
+    "openai": ProviderConfig(
+        OpenAIAgent,
+        DEFAULT_OPENAI_MODEL,
+        DEFAULT_OPENAI_BASE_URL,
+        DEFAULT_OPENAI_API_KEY_ENV,
+        "results_8puzzle_openai.json",
+    ),
+}
 
 
 def bounded_max_turns(value: str) -> int:
@@ -80,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_TURNS,
         help="Maximum moves per episode (default: 45)",
     )
-    parser.add_argument("--provider", choices=("deepseek", "openai"), default="deepseek")
+    parser.add_argument("--provider", choices=tuple(PROVIDERS), default="deepseek")
     parser.add_argument("--model", default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default=None)
@@ -122,14 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def resolve_provider_args(args: argparse.Namespace) -> None:
-    if args.provider == "deepseek":
-        args.model = args.model or DEFAULT_MODEL
-        args.base_url = args.base_url or DEFAULT_BASE_URL
-        args.api_key_env = args.api_key_env or DEFAULT_API_KEY_ENV
-    else:
-        args.model = args.model or DEFAULT_OPENAI_MODEL
-        args.base_url = args.base_url or DEFAULT_OPENAI_BASE_URL
-        args.api_key_env = args.api_key_env or DEFAULT_OPENAI_API_KEY_ENV
+    provider = PROVIDERS[args.provider]
+    args.model = args.model or provider.default_model
+    args.base_url = args.base_url or provider.default_base_url
+    args.api_key_env = args.api_key_env or provider.default_api_key_env
 
 
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
@@ -149,19 +188,19 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "reasoning_effort": args.reasoning_effort,
         "max_tokens": args.max_tokens,
         "save_trajectories": args.save_trajectories,
+        "action_interface": ACTION_INTERFACE,
+        "reward_scheme": REWARD_SCHEME,
+        "distance_progress_weight": DISTANCE_PROGRESS_WEIGHT,
+        "max_puzzle_distance": MAX_PUZZLE_DISTANCE,
     }
 
 
 def main() -> None:
     args = build_parser().parse_args()
     resolve_provider_args(args)
+    provider = PROVIDERS[args.provider]
     if args.output is None:
-        filename = (
-            "results_8puzzle_deepseek_v4_flash.json"
-            if args.provider == "deepseek"
-            else "results_8puzzle_openai.json"
-        )
-        args.output = Path("eval") / filename
+        args.output = Path("eval") / provider.default_output
     examples = load_examples(
         dataset=args.dataset,
         config=args.config,
@@ -173,27 +212,17 @@ def main() -> None:
     api_key = get_api_key(args.api_key_env, args.dotenv)
     worker_local = threading.local()
 
-    def agent_factory() -> DeepSeekAgent | OpenAIAgent:
+    def agent_factory() -> DeepSeekAgent | GLMAgent | OpenAIAgent:
         agent = getattr(worker_local, "agent", None)
         if agent is None:
-            if args.provider == "deepseek":
-                agent = DeepSeekAgent(
-                    api_key=api_key,
-                    model=args.model,
-                    base_url=args.base_url,
-                    thinking=args.thinking,
-                    reasoning_effort=args.reasoning_effort,
-                    max_tokens=args.max_tokens,
-                )
-            else:
-                agent = OpenAIAgent(
-                    api_key=api_key,
-                    model=args.model,
-                    base_url=args.base_url,
-                    thinking=args.thinking,
-                    reasoning_effort=args.reasoning_effort,
-                    max_tokens=args.max_tokens,
-                )
+            agent = provider.agent_class(
+                api_key=api_key,
+                model=args.model,
+                base_url=args.base_url,
+                thinking=args.thinking,
+                reasoning_effort=args.reasoning_effort,
+                max_tokens=args.max_tokens,
+            )
             worker_local.agent = agent
         return agent
 

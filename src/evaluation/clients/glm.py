@@ -1,36 +1,31 @@
-"""DeepSeek Chat Completions client."""
+"""Z.AI GLM Chat Completions client."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from evaluation.clients.common import (
-    api_error_metadata,
-    parse_chat_response,
-    validate_reasoning_effort,
-)
+from evaluation.clients.common import api_error_metadata, parse_chat_response
 from evaluation.constants import (
-    DEFAULT_BASE_URL,
+    DEFAULT_GLM_BASE_URL,
+    DEFAULT_GLM_MODEL,
     DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL,
-    DEFAULT_REASONING_EFFORT,
     DEFAULT_THINKING,
     MOVE_TOOL,
 )
 from evaluation.protocol import build_messages
 
 
-class DeepSeekAgent:
-    """One-request-per-state DeepSeek adapter."""
+class GLMAgent:
+    """One-request-per-state GLM-4.5-Air adapter."""
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = DEFAULT_MODEL,
-        base_url: str = DEFAULT_BASE_URL,
+        model: str = DEFAULT_GLM_MODEL,
+        base_url: str = DEFAULT_GLM_BASE_URL,
         thinking: bool = DEFAULT_THINKING,
-        reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+        reasoning_effort: str = "medium",
         max_tokens: int = DEFAULT_MAX_TOKENS,
         client: Any | None = None,
     ) -> None:
@@ -38,10 +33,11 @@ class DeepSeekAgent:
             from openai import OpenAI
 
             client = OpenAI(api_key=api_key, base_url=base_url)
-        validate_reasoning_effort(reasoning_effort)
         self.client = client
         self.model = model
         self.thinking = thinking
+        # Kept for consistent CLI metadata; GLM-4.5-Air controls thinking with
+        # thinking.type rather than a per-level reasoning_effort parameter.
         self.reasoning_effort = reasoning_effort
         self.max_tokens = max_tokens
         self.last_response_metadata: dict[str, Any] = {}
@@ -51,18 +47,15 @@ class DeepSeekAgent:
             "model": self.model,
             "messages": build_messages(board),
             "tools": [MOVE_TOOL],
-            "tool_choice": (
-                "auto"
-                if self.thinking
-                else {"type": "function", "function": {"name": "slide_tile"}}
-            ),
+            # Z.AI currently supports only auto tool selection.
+            "tool_choice": "auto",
             "max_tokens": self.max_tokens,
             "extra_body": {
-                "thinking": {"type": "enabled" if self.thinking else "disabled"}
+                "thinking": {
+                    "type": "enabled" if self.thinking else "disabled",
+                }
             },
         }
-        if self.thinking:
-            request["reasoning_effort"] = self.reasoning_effort
         try:
             response = self.client.chat.completions.create(**request)
         except Exception as exc:
@@ -71,8 +64,8 @@ class DeepSeekAgent:
         try:
             result, self.last_response_metadata = parse_chat_response(
                 response,
-                provider="DeepSeek",
-                truncated_reasons={"length"},
+                provider="GLM",
+                truncated_reasons={"length", "model_context_window_exceeded"},
             )
         except RuntimeError:
             self.last_response_metadata = {
