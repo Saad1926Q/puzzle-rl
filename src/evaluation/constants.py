@@ -1,4 +1,4 @@
-"""Constants for the 8-puzzle evaluation protocol and DeepSeek adapter."""
+"""Constants for the 8-puzzle evaluation protocol and provider adapters."""
 
 from __future__ import annotations
 
@@ -12,6 +12,13 @@ DEFAULT_OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 DEFAULT_GLM_MODEL = "glm-4.5-air"
 DEFAULT_GLM_BASE_URL = "https://api.z.ai/api/paas/v4"
 DEFAULT_GLM_API_KEY_ENV = "ZAI_API_KEY"
+DEFAULT_QWEN_MODEL = "Qwen/Qwen3.5-0.8B"
+DEFAULT_QWEN_BASE_URL = "http://localhost:8000/v1"
+DEFAULT_QWEN_TEMPERATURE = 1.0
+DEFAULT_QWEN_TOP_P = 1.0
+DEFAULT_QWEN_TOP_K = 20
+DEFAULT_QWEN_PRESENCE_PENALTY = 2.0
+DEFAULT_QWEN_REPETITION_PENALTY = 1.0
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_THINKING = True

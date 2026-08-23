@@ -139,13 +139,57 @@ eval/glm-4.7.json
 eval/glm-4.7.trajectories.json
 ```
 
-Use another provider with:
+Available providers:
 
 ```text
 --provider deepseek
 --provider glm
 --provider openai
+--provider qwen
 ```
+
+### Evaluating Qwen3.5 locally
+
+The evaluator connects to an already-running OpenAI-compatible server; it does
+not start or manage vLLM. Start vLLM in a separate environment or terminal:
+
+```bash
+vllm serve Qwen/Qwen3.5-0.8B \
+    --port 8000 \
+    --max-model-len 4096 \
+    --language-model-only \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder
+```
+
+Then run the evaluator:
+
+```bash
+uv run python scripts/run_eval_8puzzle.py \
+    --provider qwen \
+    --model Qwen/Qwen3.5-0.8B \
+    --base-url http://localhost:8000/v1 \
+    --dataset data/eval_puzzles_3x3_45.jsonl \
+    --num-rollouts 8 \
+    --parallelism 8 \
+    --max-tokens 256 \
+    --no-thinking \
+    --save-trajectories \
+    --output eval/qwen3.5-0.8b.json
+```
+
+Qwen uses its native `slide_tile` tool-call format through vLLM. The local
+server requires no API key. Qwen defaults to non-thinking mode; pass
+`--thinking` to compare reasoning mode separately.
+
+I got some advice from another RL practitioner, so I will start with the
+simplest useful experiment: evaluate the post-trained Qwen3.5 checkpoints
+before doing any SFT. I will first smoke-test the 0.8B, 2B, and 4B models, then
+run the full evaluation set with multiple rollouts. I want to see whether one
+of them already produces rewards that are varied enough for RL rather than
+concentrating almost entirely at failure or success. I will compare solved,
+illegal, malformed, timeout, reward, and `pass@k` metrics, then inspect the
+saved trajectories before choosing a checkpoint and training setup.
 
 Useful options include:
 

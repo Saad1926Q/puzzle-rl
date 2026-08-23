@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Evaluate a DeepSeek-compatible model on the 8-puzzle eval set.
+"""Evaluate a model on the authoritative tile-action 8-puzzle set.
 
 Example:
     uv run python scripts/run_eval_8puzzle.py \
-      --model deepseek-v4-flash \
-      --output eval/results_8puzzle_deepseek_v4_flash.json
-
+      --provider qwen \
+      --model Qwen/Qwen3.5-0.8B \
+      --base-url http://localhost:8000/v1
 """
 
 from __future__ import annotations
@@ -30,6 +30,13 @@ from evaluation.constants import (
     DEFAULT_OPENAI_API_KEY_ENV,
     DEFAULT_OPENAI_BASE_URL,
     DEFAULT_OPENAI_MODEL,
+    DEFAULT_QWEN_BASE_URL,
+    DEFAULT_QWEN_MODEL,
+    DEFAULT_QWEN_PRESENCE_PENALTY,
+    DEFAULT_QWEN_REPETITION_PENALTY,
+    DEFAULT_QWEN_TEMPERATURE,
+    DEFAULT_QWEN_TOP_K,
+    DEFAULT_QWEN_TOP_P,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_THINKING,
     DISTANCE_PROGRESS_WEIGHT,
@@ -42,16 +49,21 @@ from evaluation.evaluator import EvaluationResult, evaluate
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import get_api_key
+
+
+type ProviderAgent = DeepSeekAgent | GLMAgent | OpenAIAgent | QwenAgent
 
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    agent_class: type[DeepSeekAgent] | type[GLMAgent] | type[OpenAIAgent]
+    agent_class: type[ProviderAgent]
     default_model: str
     default_base_url: str
-    default_api_key_env: str
+    default_api_key_env: str | None
     default_output: str
+    default_thinking: bool
 
 
 PROVIDERS = {
@@ -61,6 +73,7 @@ PROVIDERS = {
         DEFAULT_BASE_URL,
         DEFAULT_API_KEY_ENV,
         "results_8puzzle_deepseek_v4_flash.json",
+        DEFAULT_THINKING,
     ),
     "glm": ProviderConfig(
         GLMAgent,
@@ -68,6 +81,7 @@ PROVIDERS = {
         DEFAULT_GLM_BASE_URL,
         DEFAULT_GLM_API_KEY_ENV,
         "results_8puzzle_glm_4_5_air.json",
+        DEFAULT_THINKING,
     ),
     "openai": ProviderConfig(
         OpenAIAgent,
@@ -75,6 +89,15 @@ PROVIDERS = {
         DEFAULT_OPENAI_BASE_URL,
         DEFAULT_OPENAI_API_KEY_ENV,
         "results_8puzzle_openai.json",
+        DEFAULT_THINKING,
+    ),
+    "qwen": ProviderConfig(
+        QwenAgent,
+        DEFAULT_QWEN_MODEL,
+        DEFAULT_QWEN_BASE_URL,
+        None,
+        "results_8puzzle_qwen3_5_0_8b.json",
+        False,
     ),
 }
 
@@ -133,21 +156,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--thinking",
         dest="thinking",
         action="store_true",
-        help="Enable DeepSeek reasoning mode (default)",
+        help="Enable provider-supported reasoning mode",
     )
     thinking_group.add_argument(
         "--no-thinking",
         dest="thinking",
         action="store_false",
-        help="Disable reasoning and force the strict named tool call",
+        help="Disable provider-supported reasoning mode",
     )
-    parser.set_defaults(thinking=DEFAULT_THINKING)
+    parser.set_defaults(thinking=None)
     parser.add_argument(
         "--reasoning-effort",
         choices=("low", "medium", "high", "max"),
         default=DEFAULT_REASONING_EFFORT,
     )
-    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--max-tokens", type=positive_int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_QWEN_TEMPERATURE)
+    parser.add_argument("--top-p", type=float, default=DEFAULT_QWEN_TOP_P)
+    parser.add_argument("--top-k", type=positive_int, default=DEFAULT_QWEN_TOP_K)
+    parser.add_argument(
+        "--presence-penalty", type=float, default=DEFAULT_QWEN_PRESENCE_PENALTY
+    )
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=DEFAULT_QWEN_REPETITION_PENALTY,
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -169,6 +203,8 @@ def resolve_provider_args(args: argparse.Namespace) -> None:
     args.model = args.model or provider.default_model
     args.base_url = args.base_url or provider.default_base_url
     args.api_key_env = args.api_key_env or provider.default_api_key_env
+    if args.thinking is None:
+        args.thinking = provider.default_thinking
 
 
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
@@ -187,6 +223,11 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "thinking": args.thinking,
         "reasoning_effort": args.reasoning_effort,
         "max_tokens": args.max_tokens,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "top_k": args.top_k,
+        "presence_penalty": args.presence_penalty,
+        "repetition_penalty": args.repetition_penalty,
         "save_trajectories": args.save_trajectories,
         "action_interface": ACTION_INTERFACE,
         "reward_scheme": REWARD_SCHEME,
@@ -209,20 +250,35 @@ def main() -> None:
         offset=args.offset,
     )
 
-    api_key = get_api_key(args.api_key_env, args.dotenv)
+    api_key = (
+        get_api_key(args.api_key_env, args.dotenv)
+        if args.api_key_env is not None
+        else "not-required"
+    )
     worker_local = threading.local()
 
-    def agent_factory() -> DeepSeekAgent | GLMAgent | OpenAIAgent:
+    def agent_factory() -> ProviderAgent:
         agent = getattr(worker_local, "agent", None)
         if agent is None:
-            agent = provider.agent_class(
-                api_key=api_key,
-                model=args.model,
-                base_url=args.base_url,
-                thinking=args.thinking,
-                reasoning_effort=args.reasoning_effort,
-                max_tokens=args.max_tokens,
-            )
+            agent_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "model": args.model,
+                "base_url": args.base_url,
+                "thinking": args.thinking,
+                "reasoning_effort": args.reasoning_effort,
+                "max_tokens": args.max_tokens,
+            }
+            if args.provider == "qwen":
+                agent_kwargs.update(
+                    {
+                        "temperature": args.temperature,
+                        "top_p": args.top_p,
+                        "top_k": args.top_k,
+                        "presence_penalty": args.presence_penalty,
+                        "repetition_penalty": args.repetition_penalty,
+                    }
+                )
+            agent = provider.agent_class(**agent_kwargs)
             worker_local.agent = agent
         return agent
 

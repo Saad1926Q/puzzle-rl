@@ -16,6 +16,7 @@ from evaluation.evaluator import (
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import build_messages, get_api_key, parse_tile
 from puzzle3.board import GOAL
 from puzzle3.solver import exact_distance
@@ -137,6 +138,72 @@ def test_glm_disabled_thinking_is_explicit() -> None:
     agent = GLMAgent(api_key="not-used", client=client, thinking=False)
     agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert completions.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call('{"tile":8}'))
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = QwenAgent(
+        client=client,
+        thinking=True,
+        max_tokens=256,
+        temperature=0.8,
+        top_p=0.9,
+        top_k=10,
+        presence_penalty=1.5,
+        repetition_penalty=1.1,
+    )
+
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert completions.kwargs["tools"][0]["function"]["name"] == "slide_tile"
+    assert completions.kwargs["tool_choice"] == "auto"
+    assert completions.kwargs["parallel_tool_calls"] is False
+    assert completions.kwargs["max_tokens"] == 256
+    assert completions.kwargs["temperature"] == 0.8
+    assert completions.kwargs["top_p"] == 0.9
+    assert completions.kwargs["presence_penalty"] == 1.5
+    assert completions.kwargs["extra_body"] == {
+        "top_k": 10,
+        "repetition_penalty": 1.1,
+        "enable_thinking": True,
+    }
+    assert agent.last_response_metadata["status"] == "tool_call"
+
+
+def test_qwen_defaults_to_non_thinking_mode() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+
+    QwenAgent(client=client).next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
+
+    assert completions.kwargs["extra_body"]["enable_thinking"] is False
+
+
+def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
+    import runpy
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    args = runner["build_parser"]().parse_args(["--provider", "qwen"])
+    runner["resolve_provider_args"](args)
+
+    assert args.model == "Qwen/Qwen3.5-0.8B"
+    assert args.base_url == "http://localhost:8000/v1"
+    assert args.api_key_env is None
+    assert args.thinking is False
 
 
 def test_openai_responses_tool_call_uses_responses_parameters() -> None:

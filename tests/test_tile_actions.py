@@ -59,12 +59,18 @@ def test_exact_distance_table_has_expected_reachable_states() -> None:
     assert max(solver_module._DISTANCE_TABLE.values()) == 31
 
 
-def test_regenerated_eval_files_have_valid_tile_action_records() -> None:
-    for path in (
-        "data/eval_puzzles_3x3_45.jsonl",
-        "data/eval_puzzles_3x3_45.parquet",
-    ):
-        examples = load_examples(dataset=path)
+def test_regenerated_eval_files_have_valid_tile_action_records(tmp_path) -> None:
+    import runpy
+
+    generator = runpy.run_path("data/generate_eval_data_3x3.py")
+    records = generator["generate_eval_candidates"](45, random.Random(42))
+    jsonl_path = tmp_path / "eval.jsonl"
+    parquet_path = tmp_path / "eval.parquet"
+    generator["write_eval_jsonl"](records, jsonl_path)
+    generator["write_eval_parquet"](records, parquet_path)
+
+    for path in (jsonl_path, parquet_path):
+        examples = load_examples(dataset=str(path))
         assert len(examples) == 45
         assert Counter(example.metadata["bucket"] for example in examples) == {
             "easy": 15,
