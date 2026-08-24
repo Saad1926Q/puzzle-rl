@@ -46,6 +46,7 @@ def test_messages_contain_current_board_but_no_history() -> None:
     messages = build_messages((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert len(messages) == 2
     assert "1 2 3" in messages[1]["content"]
+    assert "1 2 3 / 4 5 6 / 7 8 0" in messages[0]["content"]
     assert "history" not in messages[1]["content"].lower()
 
 
@@ -172,7 +173,7 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
     assert completions.kwargs["extra_body"] == {
         "top_k": 10,
         "repetition_penalty": 1.1,
-        "enable_thinking": True,
+        "chat_template_kwargs": {"enable_thinking": True},
     }
     assert agent.last_response_metadata["status"] == "tool_call"
 
@@ -190,7 +191,9 @@ def test_qwen_defaults_to_non_thinking_mode() -> None:
 
     QwenAgent(client=client).next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
 
-    assert completions.kwargs["extra_body"]["enable_thinking"] is False
+    assert completions.kwargs["extra_body"]["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }
 
 
 def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:

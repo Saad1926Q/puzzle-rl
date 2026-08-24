@@ -80,7 +80,7 @@ class QwenAgent:
             "extra_body": {
                 "top_k": self.top_k,
                 "repetition_penalty": self.repetition_penalty,
-                "enable_thinking": self.thinking,
+                "chat_template_kwargs": {"enable_thinking": self.thinking},
             },
         }
         try:

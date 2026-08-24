@@ -8,3 +8,4 @@ data/run_sft_1000.sh
 .testdeps
 eval/
 .pi
+experiments/

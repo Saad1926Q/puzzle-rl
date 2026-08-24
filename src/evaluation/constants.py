@@ -24,10 +24,11 @@ DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_THINKING = True
 
 SYSTEM_PROMPT = """You solve one 3x3 sliding puzzle one move at a time.
-On each turn, choose one numbered tile adjacent to the blank (0) and slide that tile into the
-blank. Call slide_tile exactly once with that tile's number. Do not submit the blank, a
-non-adjacent tile, a plan, or a list of tiles. The board in the user message is the complete
-current state; do not assume or request history."""
+The solved board is 1 2 3 / 4 5 6 / 7 8 0. On each turn, choose one numbered
+tile adjacent to the blank (0) and slide that tile into the blank. Call
+slide_tile exactly once with that tile's number. Do not submit the blank, a
+non-adjacent tile, a plan, or a list of tiles. The board in the user message
+is the complete current state; do not assume or request history."""
 
 SLIDE_TILE_TOOL = {
     "type": "function",
