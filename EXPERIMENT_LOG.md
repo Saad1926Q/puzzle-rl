@@ -35,4 +35,4 @@ Observed per-depth outcomes were strongest at depths 3–4, weak at depths 5–6
 
 ### Next step
 
-Run a denser held-out evaluation across depths 3–10 before choosing the RL mixture or adding targeted rejection-sampling/solver-generated SFT.
+Run the fixed 272-puzzle held-out benchmark across depths 3–31, with dense coverage at depths 3–10 and sparse coverage above depth 10, before choosing the RL mixture or adding targeted rejection-sampling/solver-generated SFT.
