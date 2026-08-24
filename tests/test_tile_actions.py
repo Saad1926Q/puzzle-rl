@@ -83,6 +83,23 @@ def test_regenerated_eval_files_have_valid_tile_action_records(tmp_path) -> None
             assert len(example.optimal_actions) == example.optimal_length
 
 
+def test_exhaustive_eval_has_requested_unseen_boards() -> None:
+    import runpy
+
+    generator = runpy.run_path("data/create_exhaustive_eval.py")
+    depth_counts = generator["DEPTH_COUNTS"]
+    generate = generator["generate_exhaustive_eval_candidates"]
+    excluded = {
+        (1, 2, 3, 4, 5, 6, 7, 0, 8),
+        (1, 2, 3, 4, 5, 6, 0, 7, 8),
+    }
+    records = generate(random.Random(42), excluded)
+
+    assert len(records) == 272
+    assert Counter(record["optimal_length"] for record in records) == depth_counts
+    assert not ({tuple(record["board"]) for record in records} & excluded)
+
+
 def test_scramble_never_immediately_reverses_tile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

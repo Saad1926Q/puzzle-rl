@@ -1,14 +1,16 @@
 import argparse
-import json
 import random
-from collections import defaultdict, deque
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset
-
-from evaluation.constants import ACTION_INTERFACE
-from puzzle3.board import Board, GOAL, TileAction, adjacent_tiles, slide_tile
+from evaluation.generation import (
+    enumerate_from_goal as _enumerate_from_goal,
+    make_eval_record as _make_eval_record,
+    write_eval_jsonl,
+    write_eval_parquet,
+)
+from puzzle3.board import Board, TileAction
 
 
 BUCKETS = (
@@ -26,44 +28,6 @@ def _compute_bucket_counts(num_tasks: int) -> list[tuple[str, int, int, int]]:
         (label, min_depth, max_depth, base_count + (index < remainder))
         for index, (label, min_depth, max_depth) in enumerate(BUCKETS)
     ]
-
-
-def _enumerate_from_goal() -> dict[Board, list[TileAction]]:
-    """Return every reachable 8-puzzle state with an optimal path from GOAL."""
-
-    queue = deque([GOAL])
-    paths: dict[Board, list[TileAction]] = {GOAL: []}
-
-    while queue:
-        board = queue.popleft()
-        for tile in adjacent_tiles(board):
-            nxt = slide_tile(board, tile)
-            if nxt in paths:
-                continue
-            paths[nxt] = [*paths[board], tile]
-            queue.append(nxt)
-
-    return paths
-
-
-def _solution_from_goal_path(path_from_goal: list[TileAction]) -> list[TileAction]:
-    """Reverse a GOAL->board path into a board->GOAL solution."""
-
-    return list(reversed(path_from_goal))
-
-
-def _make_eval_record(
-    board: Board, bucket: str, path_from_goal: list[TileAction]
-) -> dict[str, Any]:
-    optimal_actions = _solution_from_goal_path(path_from_goal)
-    return {
-        "board": list(board),
-        "scramble_depth": len(optimal_actions),
-        "bucket": bucket,
-        "action_interface": ACTION_INTERFACE,
-        "optimal_actions": optimal_actions,
-        "optimal_length": len(optimal_actions),
-    }
 
 
 def _select_state_quantiles(
@@ -117,18 +81,6 @@ def generate_eval_candidates(
         records.extend(_make_eval_record(board, label, path) for board, path in choices)
 
     return records
-
-
-def write_eval_jsonl(records: list[dict[str, Any]], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as file:
-        for record in records:
-            file.write(json.dumps(record) + "\n")
-
-
-def write_eval_parquet(records: list[dict[str, Any]], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    Dataset.from_list(records).to_parquet(str(output_path))
 
 
 def main() -> None:
