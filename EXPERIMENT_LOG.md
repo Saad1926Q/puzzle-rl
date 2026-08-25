@@ -36,3 +36,11 @@ Observed per-depth outcomes were strongest at depths 3–4, weak at depths 5–6
 ### Next step
 
 Run the fixed 272-puzzle held-out benchmark across depths 3–31, with dense coverage at depths 3–10 and sparse coverage above depth 10, before choosing the RL mixture or adding targeted rejection-sampling/solver-generated SFT.
+
+## 2026-08-25 — Exhaustive model-selection matrix
+
+Run Qwen3.5 0.8B, 2B, and 4B on the fixed `exhaustive` configuration (272 puzzles, depths 3–31), using four rollouts per puzzle. Evaluate each checkpoint in non-thinking mode (`max_tokens=128`) and thinking mode (`max_tokens=7000`); use vLLM with an 8,192-token context and 16 concurrent sequences.
+
+Keep the completed Qwen3.5-4B non-thinking eight-rollout exhaustive evaluation as the higher-confidence reference. The standardized four-rollout matrix is for cross-model and cross-mode comparison.
+
+Select the prospective SFT base checkpoint from depth 3–10 outcomes: per-episode solved rate, legal-action rate, distance-progress reward variance, malformed/truncated rate, and completion-token cost. Do not select from aggregate performance alone because depths 16–31 are expected to be uniformly inactive.
