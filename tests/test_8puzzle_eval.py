@@ -13,6 +13,7 @@ from evaluation.evaluator import (
     distance_progress_reward,
     solved_reward,
 )
+from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
@@ -191,6 +192,53 @@ def _fake_responses_response(*, arguments='{"tile":8}', status="completed"):
     )()
 
 
+
+
+def test_crof_uses_standard_chat_parameters_and_reasoning() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(
+                tool_calls=_fake_tool_call('{"tile": 8}'),
+                reasoning_content="Move tile 8 into the blank.",
+            )
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = CrofAgent(
+        api_key="not-used",
+        client=client,
+        model="glm-5.3-flash",
+        reasoning_effort="medium",
+    )
+
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert completions.kwargs["model"] == "glm-5.3-flash"
+    assert completions.kwargs["tool_choice"] == "auto"
+    assert completions.kwargs["reasoning_effort"] == "medium"
+    assert "extra_body" not in completions.kwargs
+    assert agent.last_response_metadata["reasoning_content"] == (
+        "Move tile 8 into the blank."
+    )
+
+
+def test_crof_omits_reasoning_effort_when_thinking_is_disabled() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    CrofAgent(api_key="not-used", client=client, thinking=False).next_action(
+        (1, 2, 3, 4, 5, 6, 7, 0, 8)
+    )
+
+    assert "reasoning_effort" not in completions.kwargs
 def test_deepseek_strict_tool_call_is_canonicalized() -> None:
     class Completions:
         def create(self, **kwargs):
@@ -322,6 +370,11 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     assert args.thinking is False
     assert history_args.keep_history is True
     assert history_args.keep_reasoning is True
+    crof_args = runner["build_parser"]().parse_args(["--provider", "crof"])
+    runner["resolve_provider_args"](crof_args)
+    assert crof_args.model == "glm-5.3-flash"
+    assert crof_args.base_url == "https://crof.ai/v1"
+    assert crof_args.api_key_env == "CROF_API_KEY"
 
 
 def test_openai_responses_tool_call_uses_responses_parameters() -> None:

@@ -117,6 +117,7 @@ Provide the relevant API key through the environment or a local `.env` file:
 DEEPSEEK_API_KEY=your_key_here
 ZAI_API_KEY=your_key_here
 OPENAI_API_KEY=your_key_here
+CROF_API_KEY=your_key_here
 ```
 
 Run an evaluation:
@@ -146,6 +147,7 @@ Available providers:
 ```text
 --provider deepseek
 --provider glm
+--provider crof
 --provider openai
 --provider qwen
 ```

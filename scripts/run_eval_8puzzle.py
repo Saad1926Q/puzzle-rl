@@ -20,6 +20,9 @@ from typing import Any
 from evaluation.constants import (
     ACTION_INTERFACE,
     DEFAULT_API_KEY_ENV,
+    DEFAULT_CROF_API_KEY_ENV,
+    DEFAULT_CROF_BASE_URL,
+    DEFAULT_CROF_MODEL,
     DEFAULT_BASE_URL,
     DEFAULT_GLM_API_KEY_ENV,
     DEFAULT_GLM_BASE_URL,
@@ -46,6 +49,7 @@ from evaluation.constants import (
 )
 from evaluation.dataset import load_examples
 from evaluation.evaluator import EvaluationResult, evaluate
+from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
@@ -53,7 +57,7 @@ from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import get_api_key
 
 
-type ProviderAgent = DeepSeekAgent | GLMAgent | OpenAIAgent | QwenAgent
+type ProviderAgent = CrofAgent | DeepSeekAgent | GLMAgent | OpenAIAgent | QwenAgent
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,14 @@ class ProviderConfig:
 
 
 PROVIDERS = {
+    "crof": ProviderConfig(
+        CrofAgent,
+        DEFAULT_CROF_MODEL,
+        DEFAULT_CROF_BASE_URL,
+        DEFAULT_CROF_API_KEY_ENV,
+        "results_8puzzle_crof_glm_5_3_flash.json",
+        DEFAULT_THINKING,
+    ),
     "deepseek": ProviderConfig(
         DeepSeekAgent,
         DEFAULT_MODEL,
