@@ -54,18 +54,31 @@ def test_messages_contain_current_board_but_no_history() -> None:
 
 
 
-def test_messages_include_optional_turn_history_and_reasoning() -> None:
+def test_messages_preserve_turn_roles_and_optional_reasoning() -> None:
     history = (
+        HistoryTurn((1, 2, 3, 4, 5, 6, 0, 7, 8), tile=7, reasoning="Move right."),
         HistoryTurn((1, 2, 3, 4, 5, 6, 7, 0, 8), tile=8, reasoning="Solve it."),
     )
 
     without_reasoning = build_messages(GOAL, history)
     with_reasoning = build_messages(GOAL, history, include_reasoning=True)
 
-    assert "Past turns" in without_reasoning[1]["content"]
-    assert "Action: slide tile 8" in without_reasoning[1]["content"]
-    assert "Solve it." not in without_reasoning[1]["content"]
-    assert "Solve it." in with_reasoning[1]["content"]
+    assert [message["role"] for message in without_reasoning] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "0 7 8" in without_reasoning[1]["content"]
+    assert without_reasoning[2]["content"] == "Action: slide tile 7"
+    assert "7 0 8" in without_reasoning[3]["content"]
+    assert without_reasoning[4]["content"] == "Action: slide tile 8"
+    assert "7 8 0" in without_reasoning[5]["content"]
+    assert "Move right." not in without_reasoning[2]["content"]
+    assert "Reasoning:\nMove right." in with_reasoning[2]["content"]
+    assert with_reasoning[2]["content"].endswith("Action: slide tile 7")
 
 
 def test_history_is_bounded_to_four_completed_turns() -> None:

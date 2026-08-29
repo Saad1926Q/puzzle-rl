@@ -43,34 +43,52 @@ def build_messages(
     *,
     include_reasoning: bool = False,
 ) -> list[dict[str, str]]:
-    """Build a request from the current board and optional bounded turn history."""
+    """Build a request with role-preserving bounded turn history."""
 
-    history_lines: list[str] = []
-    if history:
-        history_lines.append("Past turns (oldest first):")
-        for index, turn in enumerate(history, start=1):
-            history_lines.extend(
-                (
-                    f"Turn -{len(history) - index + 1} board:",
-                    render(turn.board),
-                    f"Action: slide tile {turn.tile}",
-                )
-            )
-            if include_reasoning and turn.reasoning:
-                history_lines.extend(("Reasoning:", turn.reasoning))
-
-    board_text = "\n".join(
+    current_prompt = "\n".join(
         (
-            *history_lines,
             "Current board (0 is the blank):",
             render(board),
             "\nChoose the single adjacent numbered tile to slide into the blank now.",
         )
     )
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": board_text},
-    ]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if not history:
+        messages.append({"role": "user", "content": current_prompt})
+        return messages
+
+    messages.append(
+        {
+            "role": "user",
+            "content": "\n".join(
+                ("Board at start of retained history (0 is the blank):", render(history[0].board))
+            ),
+        }
+    )
+    for index, turn in enumerate(history):
+        action = f"Action: slide tile {turn.tile}"
+        assistant_content = (
+            "\n\n".join(("Reasoning:\n" + turn.reasoning, action))
+            if include_reasoning and turn.reasoning
+            else action
+        )
+        messages.append({"role": "assistant", "content": assistant_content})
+        next_board = history[index + 1].board if index + 1 < len(history) else board
+        observation = "\n".join(
+            (
+                "Board after that action (0 is the blank):",
+                render(next_board),
+                *(
+                    (
+                        "\nChoose the single adjacent numbered tile to slide into the blank now.",
+                    )
+                    if index + 1 == len(history)
+                    else ()
+                ),
+            )
+        )
+        messages.append({"role": "user", "content": observation})
+    return messages
 
 
 def _valid_tile(value: Any) -> int | None:
