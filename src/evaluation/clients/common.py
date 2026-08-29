@@ -56,7 +56,10 @@ def parse_chat_response(
         ) from exc
 
     content = _text_content(getattr(message, "content", None))
-    reasoning = _text_content(getattr(message, "reasoning_content", None))
+    reasoning = _text_content(
+        getattr(message, "reasoning", None)
+        or getattr(message, "reasoning_content", None)
+    )
     tile, tool_metadata = extract_chat_tool_tile(message)
     finish_reason = getattr(choice, "finish_reason", None)
     truncated = finish_reason in truncated_reasons

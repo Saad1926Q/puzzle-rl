@@ -51,7 +51,12 @@ def test_messages_contain_current_board_but_no_history() -> None:
 
 
 def _fake_response(
-    *, content="", tool_calls=None, finish_reason="tool_calls", reasoning_content=None
+    *,
+    content="",
+    tool_calls=None,
+    finish_reason="tool_calls",
+    reasoning=None,
+    reasoning_content=None,
 ):
     message = type(
         "Message",
@@ -59,6 +64,7 @@ def _fake_response(
         {
             "content": content,
             "tool_calls": tool_calls,
+            "reasoning": reasoning,
             "reasoning_content": reasoning_content,
         },
     )()
@@ -145,7 +151,10 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
     class Completions:
         def create(self, **kwargs):
             self.kwargs = kwargs
-            return _fake_response(tool_calls=_fake_tool_call('{"tile":8}'))
+            return _fake_response(
+                tool_calls=_fake_tool_call('{"tile":8}'),
+                reasoning="reason about the board",
+            )
 
     completions = Completions()
     client = type(
@@ -178,6 +187,7 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
         "chat_template_kwargs": {"enable_thinking": True},
     }
     assert agent.last_response_metadata["status"] == "tool_call"
+    assert agent.last_response_metadata["reasoning_content"] == "reason about the board"
 
 
 def test_qwen_defaults_to_non_thinking_mode() -> None:
