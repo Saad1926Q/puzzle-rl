@@ -46,6 +46,8 @@ def test_messages_contain_current_board_but_no_history() -> None:
     messages = build_messages((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert len(messages) == 2
     assert "1 2 3" in messages[1]["content"]
+    assert "7 0 8" in messages[1]["content"]
+    assert "_" not in messages[1]["content"]
     assert "1 2 3 / 4 5 6 / 7 8 0" in messages[0]["content"]
     assert "history" not in messages[1]["content"].lower()
 
