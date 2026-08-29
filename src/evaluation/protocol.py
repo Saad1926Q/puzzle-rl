@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 from dotenv import load_dotenv
 
@@ -14,18 +15,53 @@ from puzzle3.board import Board
 from puzzle3.render import render
 
 
+@dataclass(frozen=True)
+class HistoryTurn:
+    """One completed environment transition available as future-turn context."""
+
+    board: Board
+    tile: int
+    reasoning: str = ""
+
+
 class PuzzleAgent(Protocol):
     """Minimal interface required by the stateful evaluator."""
 
-    def next_action(self, board: Board) -> str:
+    def next_action(
+        self,
+        board: Board,
+        history: Sequence[HistoryTurn] = (),
+        *,
+        include_reasoning: bool = False,
+    ) -> str:
         """Return one canonical tile-selection response for the current board."""
 
 
-def build_messages(board: Board) -> list[dict[str, str]]:
-    """Build a fresh request; no previous state or action is included."""
+def build_messages(
+    board: Board,
+    history: Sequence[HistoryTurn] = (),
+    *,
+    include_reasoning: bool = False,
+) -> list[dict[str, str]]:
+    """Build a request from the current board and optional bounded turn history."""
+
+    history_lines: list[str] = []
+    if history:
+        history_lines.append("Past turns (oldest first):")
+        for index, turn in enumerate(history, start=1):
+            history_lines.extend(
+                (
+                    f"Turn -{len(history) - index + 1} board:",
+                    render(turn.board),
+                    f"Action: slide tile {turn.tile}",
+                )
+            )
+            if include_reasoning and turn.reasoning:
+                history_lines.extend(("Reasoning:", turn.reasoning))
 
     board_text = "\n".join(
         (
+            *history_lines,
             "Current board (0 is the blank):",
             render(board),
             "\nChoose the single adjacent numbered tile to slide into the blank now.",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from evaluation.clients.common import api_error_metadata, parse_chat_response
 from evaluation.constants import (
@@ -16,7 +16,7 @@ from evaluation.constants import (
     DEFAULT_QWEN_TOP_P,
     SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import build_messages
+from evaluation.protocol import HistoryTurn, build_messages
 from puzzle3.board import Board
 
 
@@ -66,10 +66,18 @@ class QwenAgent:
         self.repetition_penalty = repetition_penalty
         self.last_response_metadata: dict[str, Any] = {}
 
-    def next_action(self, board: Board) -> str:
+    def next_action(
+        self,
+        board: Board,
+        history: Sequence[HistoryTurn] = (),
+        *,
+        include_reasoning: bool = False,
+    ) -> str:
         request: dict[str, Any] = {
             "model": self.model,
-            "messages": build_messages(board),
+            "messages": build_messages(
+                board, history, include_reasoning=include_reasoning
+            ),
             "tools": [SLIDE_TILE_TOOL],
             "tool_choice": "auto",
             "parallel_tool_calls": False,

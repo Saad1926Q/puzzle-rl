@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Sequence
 
 from evaluation.clients.common import (
     api_error_metadata,
@@ -17,7 +17,12 @@ from evaluation.constants import (
     DEFAULT_REASONING_EFFORT,
     SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import build_messages, extract_responses_tool_tile, json_safe
+from evaluation.protocol import (
+    HistoryTurn,
+    build_messages,
+    extract_responses_tool_tile,
+    json_safe,
+)
 from puzzle3.board import Board
 
 
@@ -47,7 +52,13 @@ class OpenAIAgent:
         self.max_tokens = max_tokens
         self.last_response_metadata: dict[str, Any] = {}
 
-    def next_action(self, board: Board) -> str:
+    def next_action(
+        self,
+        board: Board,
+        history: Sequence[HistoryTurn] = (),
+        *,
+        include_reasoning: bool = False,
+    ) -> str:
         tool = {
             "type": "function",
             "name": "slide_tile",
@@ -57,7 +68,9 @@ class OpenAIAgent:
         }
         request: dict[str, Any] = {
             "model": self.model,
-            "input": build_messages(board),
+            "input": build_messages(
+                board, history, include_reasoning=include_reasoning
+            ),
             "tools": [tool],
             "tool_choice": {"type": "function", "name": "slide_tile"},
             "parallel_tool_calls": False,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 
 import pytest
@@ -17,7 +17,7 @@ from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
 from evaluation.clients.qwen import QwenAgent
-from evaluation.protocol import build_messages, get_api_key, parse_tile
+from evaluation.protocol import HistoryTurn, build_messages, get_api_key, parse_tile
 from puzzle3.board import GOAL
 from puzzle3.solver import exact_distance
 
@@ -51,6 +51,98 @@ def test_messages_contain_current_board_but_no_history() -> None:
     assert "1 2 3 / 4 5 6 / 7 8 0" in messages[0]["content"]
     assert "history" not in messages[1]["content"].lower()
 
+
+
+def test_messages_include_optional_turn_history_and_reasoning() -> None:
+    history = (
+        HistoryTurn((1, 2, 3, 4, 5, 6, 7, 0, 8), tile=8, reasoning="Solve it."),
+    )
+
+    without_reasoning = build_messages(GOAL, history)
+    with_reasoning = build_messages(GOAL, history, include_reasoning=True)
+
+    assert "Past turns" in without_reasoning[1]["content"]
+    assert "Action: slide tile 8" in without_reasoning[1]["content"]
+    assert "Solve it." not in without_reasoning[1]["content"]
+    assert "Solve it." in with_reasoning[1]["content"]
+
+
+def test_history_is_bounded_to_four_completed_turns() -> None:
+    @dataclass
+    class HistoryAgent:
+        responses: list[str]
+        received_history: list[tuple[HistoryTurn, ...]]
+
+        def next_action(
+            self,
+            board: tuple[int, ...],
+            history: tuple[HistoryTurn, ...],
+            *,
+            include_reasoning: bool,
+        ) -> str:
+            assert include_reasoning is False
+            self.received_history.append(history)
+            return self.responses.pop(0)
+    agent = HistoryAgent(
+        [
+            '{"tile": 7}',
+            '{"tile": 4}',
+            '{"tile": 1}',
+            '{"tile": 2}',
+            '{"tile": 3}',
+        ],
+        [],
+    )
+    evaluate_episode(
+        example((1, 2, 3, 4, 5, 6, 7, 0, 8)),
+        agent,
+        max_turns=5,
+        keep_history=True,
+    )
+
+    assert [len(history) for history in agent.received_history] == [0, 1, 2, 3, 4]
+    assert [turn.tile for turn in agent.received_history[-1]] == [7, 4, 1, 2]
+
+
+
+
+def test_history_retains_reasoning_only_when_requested() -> None:
+    @dataclass
+    class ReasoningAgent:
+        calls: int = 0
+        received_history: list[tuple[HistoryTurn, ...]] = field(default_factory=list)
+
+        def __post_init__(self) -> None:
+            self.last_response_metadata: dict[str, str] = {}
+        def next_action(
+            self,
+            board: tuple[int, ...],
+            history: tuple[HistoryTurn, ...],
+            *,
+            include_reasoning: bool,
+        ) -> str:
+            self.received_history.append(history)
+            self.last_response_metadata = {"reasoning_content": "Move toward goal."}
+            self.calls += 1
+            return '{"tile": 7}' if self.calls == 1 else '{"tile": 4}'
+
+    agent = ReasoningAgent()
+    evaluate_episode(
+        example((1, 2, 3, 4, 5, 6, 7, 0, 8)),
+        agent,
+        max_turns=2,
+        keep_history=True,
+        keep_reasoning=True,
+    )
+
+    assert agent.received_history[1][0].reasoning == "Move toward goal."
+def test_reasoning_history_requires_history() -> None:
+    with pytest.raises(ValueError, match="keep_reasoning requires keep_history"):
+        evaluate_episode(
+            example((1, 2, 3, 4, 5, 6, 7, 0, 8)),
+            SequenceAgent(['{"tile": 8}']),
+            keep_reasoning=True,
+        )
 
 def _fake_response(
     *,
@@ -217,6 +309,9 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     xhigh_args = runner["build_parser"]().parse_args(
         ["--provider", "qwen", "--reasoning-effort", "xhigh"]
     )
+    history_args = runner["build_parser"]().parse_args(
+        ["--provider", "qwen", "--keep-history", "--keep-reasoning"]
+    )
     args = runner["build_parser"]().parse_args(["--provider", "qwen"])
     runner["resolve_provider_args"](args)
 
@@ -225,6 +320,8 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     assert xhigh_args.reasoning_effort == "xhigh"
     assert args.api_key_env is None
     assert args.thinking is False
+    assert history_args.keep_history is True
+    assert history_args.keep_reasoning is True
 
 
 def test_openai_responses_tool_call_uses_responses_parameters() -> None:

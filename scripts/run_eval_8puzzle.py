@@ -183,6 +183,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_QWEN_REPETITION_PENALTY,
     )
     parser.add_argument(
+        "--keep-history",
+        action="store_true",
+        help="Include the previous four completed board/action turns in each request",
+    )
+    parser.add_argument(
+        "--keep-reasoning",
+        action="store_true",
+        help="Include saved reasoning in history; requires --keep-history",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -228,6 +238,8 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "top_k": args.top_k,
         "presence_penalty": args.presence_penalty,
         "repetition_penalty": args.repetition_penalty,
+        "keep_history": args.keep_history,
+        "keep_reasoning": args.keep_reasoning,
         "save_trajectories": args.save_trajectories,
         "action_interface": ACTION_INTERFACE,
         "reward_scheme": REWARD_SCHEME,
@@ -239,6 +251,8 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
 def main() -> None:
     args = build_parser().parse_args()
     resolve_provider_args(args)
+    if args.keep_reasoning and not args.keep_history:
+        raise ValueError("--keep-reasoning requires --keep-history")
     provider = PROVIDERS[args.provider]
     if args.output is None:
         args.output = Path("eval") / provider.default_output
@@ -287,6 +301,8 @@ def main() -> None:
         max_turns=args.max_turns,
         num_rollouts=args.num_rollouts,
         parallelism=args.parallelism,
+        keep_history=args.keep_history,
+        keep_reasoning=args.keep_reasoning,
         agent_factory=agent_factory,
     )
     run_metadata = metadata(args, len(examples))

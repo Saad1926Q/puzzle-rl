@@ -19,7 +19,7 @@ from evaluation.constants import (
     TIMEOUT_REWARD,
 )
 from evaluation.dataset import PuzzleExample
-from evaluation.protocol import PuzzleAgent, parse_tile
+from evaluation.protocol import HistoryTurn, PuzzleAgent, parse_tile
 from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_tile
 from puzzle3.solver import exact_distance
 
@@ -207,6 +207,8 @@ def evaluate_episode(
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
     rollout_id: int = 0,
+    keep_history: bool = False,
+    keep_reasoning: bool = False,
 ) -> EpisodeResult:
     """Run one puzzle with environment-authoritative distance-progress scoring.
 
@@ -218,8 +220,11 @@ def evaluate_episode(
 
     if not 1 <= max_turns <= MAX_TURNS:
         raise ValueError(f"max_turns must be between 1 and {MAX_TURNS}")
+    if keep_reasoning and not keep_history:
+        raise ValueError("keep_reasoning requires keep_history")
 
     board = example.board
+    history: list[HistoryTurn] = []
     steps: list[StepResult] = []
     if is_solved(board):
         return EpisodeResult(
@@ -234,7 +239,15 @@ def evaluate_episode(
 
     for turn in range(1, max_turns + 1):
         available = adjacent_tiles(board)
-        raw_response = agent.next_action(board)
+        raw_response = (
+            agent.next_action(
+                board,
+                history[-4:],
+                include_reasoning=keep_reasoning,
+            )
+            if keep_history
+            else agent.next_action(board)
+        )
         response_metadata = getattr(agent, "last_response_metadata", None)
         tile = parse_tile(raw_response)
         if tile is None:
@@ -289,6 +302,17 @@ def evaluate_episode(
                 terminal_reward=terminal_reward,
             )
         )
+        history.append(
+            HistoryTurn(
+                board=board,
+                tile=tile,
+                reasoning=(
+                    response_metadata.get("reasoning_content", "")
+                    if response_metadata
+                    else ""
+                ),
+            )
+        )
         board = next_board
         if solved:
             return EpisodeResult(
@@ -323,6 +347,8 @@ def evaluate(
     max_turns: int = DEFAULT_MAX_TURNS,
     num_rollouts: int = 1,
     parallelism: int = 1,
+    keep_history: bool = False,
+    keep_reasoning: bool = False,
     agent_factory: Callable[[], PuzzleAgent] | None = None,
 ) -> EvaluationResult:
     """Evaluate independent puzzle rollouts, optionally in parallel.
@@ -332,6 +358,8 @@ def evaluate(
     response metadata store; sharing one mutable agent across threads is unsafe.
     """
 
+    if keep_reasoning and not keep_history:
+        raise ValueError("keep_reasoning requires keep_history")
     if num_rollouts <= 0:
         raise ValueError("num_rollouts must be positive")
     if parallelism <= 0:
@@ -357,6 +385,8 @@ def evaluate(
             episode_agent,
             max_turns=max_turns,
             rollout_id=rollout_id,
+            keep_history=keep_history,
+            keep_reasoning=keep_reasoning,
         )
         return example_index, rollout_id, episode
 

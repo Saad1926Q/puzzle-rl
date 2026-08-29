@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from evaluation.clients.common import (
     api_error_metadata,
@@ -17,7 +17,7 @@ from evaluation.constants import (
     DEFAULT_THINKING,
     SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import build_messages
+from evaluation.protocol import HistoryTurn, build_messages
 from puzzle3.board import Board
 
 
@@ -47,10 +47,18 @@ class DeepSeekAgent:
         self.max_tokens = max_tokens
         self.last_response_metadata: dict[str, Any] = {}
 
-    def next_action(self, board: Board) -> str:
+    def next_action(
+        self,
+        board: Board,
+        history: Sequence[HistoryTurn] = (),
+        *,
+        include_reasoning: bool = False,
+    ) -> str:
         request: dict[str, Any] = {
             "model": self.model,
-            "messages": build_messages(board),
+            "messages": build_messages(
+                board, history, include_reasoning=include_reasoning
+            ),
             "tools": [SLIDE_TILE_TOOL],
             "tool_choice": (
                 "auto"
