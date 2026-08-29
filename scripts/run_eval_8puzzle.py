@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(thinking=None)
     parser.add_argument(
         "--reasoning-effort",
-        choices=("low", "medium", "high", "max"),
+        choices=("low", "medium", "high", "max", "xhigh"),
         default=DEFAULT_REASONING_EFFORT,
     )
     parser.add_argument("--max-tokens", type=positive_int, default=DEFAULT_MAX_TOKENS)

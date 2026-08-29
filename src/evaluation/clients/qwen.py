@@ -55,8 +55,8 @@ class QwenAgent:
         self.client = client
         self.model = model
         self.thinking = thinking
-        # Accepted for the common runner constructor; Qwen controls thinking with
-        # enable_thinking rather than a reasoning-effort level.
+        if reasoning_effort not in {"low", "medium", "xhigh"}:
+            raise ValueError("reasoning_effort must be low, medium, or xhigh")
         self.reasoning_effort = reasoning_effort
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -83,6 +83,8 @@ class QwenAgent:
                 "chat_template_kwargs": {"enable_thinking": self.thinking},
             },
         }
+        if self.thinking:
+            request["reasoning_effort"] = self.reasoning_effort
         try:
             response = self.client.chat.completions.create(**request)
         except Exception as exc:

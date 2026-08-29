@@ -154,6 +154,7 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
     agent = QwenAgent(
         client=client,
         thinking=True,
+        reasoning_effort="xhigh",
         max_tokens=256,
         temperature=0.8,
         top_p=0.9,
@@ -170,6 +171,7 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
     assert completions.kwargs["temperature"] == 0.8
     assert completions.kwargs["top_p"] == 0.9
     assert completions.kwargs["presence_penalty"] == 1.5
+    assert completions.kwargs["reasoning_effort"] == "xhigh"
     assert completions.kwargs["extra_body"] == {
         "top_k": 10,
         "repetition_penalty": 1.1,
@@ -200,11 +202,15 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     import runpy
 
     runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    xhigh_args = runner["build_parser"]().parse_args(
+        ["--provider", "qwen", "--reasoning-effort", "xhigh"]
+    )
     args = runner["build_parser"]().parse_args(["--provider", "qwen"])
     runner["resolve_provider_args"](args)
 
     assert args.model == "Qwen/Qwen3.5-0.8B"
     assert args.base_url == "http://localhost:8000/v1"
+    assert xhigh_args.reasoning_effort == "xhigh"
     assert args.api_key_env is None
     assert args.thinking is False
 
