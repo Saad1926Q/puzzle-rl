@@ -19,7 +19,7 @@ from evaluation.constants import (
 )
 from evaluation.protocol import (
     HistoryTurn,
-    build_messages,
+    build_openai_responses_input,
     extract_responses_tool_tile,
     json_safe,
 )
@@ -68,7 +68,7 @@ class OpenAIAgent:
         }
         request: dict[str, Any] = {
             "model": self.model,
-            "input": build_messages(
+            "input": build_openai_responses_input(
                 board, history, include_reasoning=include_reasoning
             ),
             "tools": [tool],

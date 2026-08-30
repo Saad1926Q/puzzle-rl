@@ -37,58 +37,110 @@ class PuzzleAgent(Protocol):
         """Return one canonical tile-selection response for the current board."""
 
 
-def build_messages(
-    board: Board,
-    history: Sequence[HistoryTurn] = (),
-    *,
-    include_reasoning: bool = False,
-) -> list[dict[str, str]]:
-    """Build a request with role-preserving bounded turn history."""
-
-    current_prompt = "\n".join(
+def _board_prompt(board: Board, *, after_action: bool = False) -> str:
+    heading = (
+        "Board after that action (0 is the blank):"
+        if after_action
+        else "Current board (0 is the blank):"
+    )
+    return "\n".join(
         (
-            "Current board (0 is the blank):",
+            heading,
             render(board),
             "\nChoose the single adjacent numbered tile to slide into the blank now.",
         )
     )
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+
+def build_chat_completion_messages(
+    board: Board,
+    history: Sequence[HistoryTurn] = (),
+    *,
+    include_reasoning: bool = False,
+) -> list[dict[str, Any]]:
+    """Build the Chat Completions wire format used by Crof, GLM, DeepSeek, and Qwen.
+
+    Historical actions become assistant ``tool_calls`` followed by ``tool``
+    results. OpenAI's Responses API uses a different schema; use
+    ``build_openai_responses_input`` for that client.
+    """
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if not history:
-        messages.append({"role": "user", "content": current_prompt})
+        messages.append({"role": "user", "content": _board_prompt(board)})
         return messages
 
-    messages.append(
-        {
-            "role": "user",
-            "content": "\n".join(
-                ("Board at start of retained history (0 is the blank):", render(history[0].board))
-            ),
-        }
-    )
+    messages.append({"role": "user", "content": _board_prompt(history[0].board)})
     for index, turn in enumerate(history):
-        action = f"Action: slide tile {turn.tile}"
-        assistant_content = (
-            "\n\n".join(("Reasoning:\n" + turn.reasoning, action))
-            if include_reasoning and turn.reasoning
-            else action
+        call_id = f"history_slide_{index}"
+        messages.append(
+            {
+                "role": "assistant",
+                "content": turn.reasoning if include_reasoning and turn.reasoning else "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": "slide_tile",
+                            "arguments": json.dumps({"tile": turn.tile}),
+                        },
+                    }
+                ],
+            }
         )
-        messages.append({"role": "assistant", "content": assistant_content})
         next_board = history[index + 1].board if index + 1 < len(history) else board
-        observation = "\n".join(
-            (
-                "Board after that action (0 is the blank):",
-                render(next_board),
-                *(
-                    (
-                        "\nChoose the single adjacent numbered tile to slide into the blank now.",
-                    )
-                    if index + 1 == len(history)
-                    else ()
-                ),
-            )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": _board_prompt(next_board, after_action=True),
+            }
         )
-        messages.append({"role": "user", "content": observation})
     return messages
+
+
+def build_openai_responses_input(
+    board: Board,
+    history: Sequence[HistoryTurn] = (),
+    *,
+    include_reasoning: bool = False,
+) -> list[dict[str, Any]]:
+    """Build the OpenAI Responses API wire format for the same puzzle context.
+
+    Unlike Chat Completions, this API represents retained actions as standalone
+    ``function_call`` and ``function_call_output`` items. Both builders accept
+    the same logical board/history inputs but serialize them for different APIs.
+    """
+
+    if not history:
+        return build_chat_completion_messages(board)
+
+    items: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": _board_prompt(history[0].board)},
+    ]
+    for index, turn in enumerate(history):
+        call_id = f"history_slide_{index}"
+        if include_reasoning and turn.reasoning:
+            items.append({"role": "assistant", "content": turn.reasoning})
+        items.append(
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": "slide_tile",
+                "arguments": json.dumps({"tile": turn.tile}),
+            }
+        )
+        next_board = history[index + 1].board if index + 1 < len(history) else board
+        items.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": _board_prompt(next_board, after_action=True),
+            }
+        )
+    return items
 
 
 def _valid_tile(value: Any) -> int | None:

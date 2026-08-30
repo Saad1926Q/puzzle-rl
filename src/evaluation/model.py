@@ -6,7 +6,7 @@ from evaluation.clients.openai_client import OpenAIAgent
 from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import (
     PuzzleAgent,
-    build_messages,
+    build_chat_completion_messages,
     get_api_key,
     json_safe,
     parse_tile,
