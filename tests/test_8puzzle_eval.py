@@ -17,6 +17,7 @@ from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.clients.openrouter import OpenRouterAgent
 from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import (
     HistoryTurn,
@@ -300,6 +301,80 @@ def test_crof_omits_reasoning_effort_when_thinking_is_disabled() -> None:
     )
 
     assert "reasoning_effort" not in completions.kwargs
+
+
+def test_openrouter_sends_reproducible_routing_and_records_metadata() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            response = _fake_response(
+                tool_calls=_fake_tool_call('{"tile": 8}'),
+                reasoning_content="Slide tile 8.",
+            )
+            response.id = "gen-test"
+            response.model = "qwen/qwen3.5-27b"
+            response.model_extra = {
+                "openrouter_metadata": {
+                    "attempt": 1,
+                    "attempts": [{"provider": "together", "status": 200}],
+                }
+            }
+            return response
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = OpenRouterAgent(
+        api_key="not-used",
+        model="qwen/qwen3.5-27b",
+        client=client,
+        thinking=False,
+        upstream_providers=("together",),
+        quantizations=("bf16",),
+        distillable_only=True,
+    )
+
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert completions.kwargs["tool_choice"] == "auto"
+    assert completions.kwargs["extra_body"] == {
+        "reasoning": {"effort": "none", "exclude": False},
+        "provider": {
+            "allow_fallbacks": False,
+            "require_parameters": True,
+            "data_collection": "deny",
+            "only": ["together"],
+            "quantizations": ["bf16"],
+            "enforce_distillable_text": True,
+        },
+    }
+    assert agent.last_response_metadata["response_id"] == "gen-test"
+    assert agent.last_response_metadata["resolved_model"] == "qwen/qwen3.5-27b"
+    assert agent.last_response_metadata["openrouter_metadata"]["attempt"] == 1
+
+
+def test_openrouter_uses_reasoning_effort_when_enabled() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        client=client,
+        reasoning_effort="xhigh",
+    ).next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
+
+    assert completions.kwargs["extra_body"]["reasoning"] == {
+        "effort": "xhigh",
+        "exclude": False,
+    }
+
 def test_deepseek_strict_tool_call_is_canonicalized() -> None:
     class Completions:
         def create(self, **kwargs):
@@ -436,6 +511,41 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     assert crof_args.model == "glm-5.3-flash"
     assert crof_args.base_url == "https://crof.ai/v1"
     assert crof_args.api_key_env == "CROF_API_KEY"
+
+
+
+
+def test_openrouter_cli_requires_model_and_uses_reproducible_defaults() -> None:
+    import runpy
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    parser = runner["build_parser"]()
+    args = parser.parse_args(
+        [
+            "--provider",
+            "openrouter",
+            "--model",
+            "qwen/qwen3.5-27b",
+            "--openrouter-upstream",
+            "together",
+            "--openrouter-quantization",
+            "bf16",
+            "--openrouter-distillable-only",
+        ]
+    )
+    runner["resolve_provider_args"](args)
+
+    assert args.base_url == "https://openrouter.ai/api/v1"
+    assert args.api_key_env == "OPENROUTER_API_KEY"
+    assert args.openrouter_allow_fallbacks is False
+    assert args.openrouter_data_collection == "deny"
+    assert args.openrouter_upstream == ["together"]
+    assert args.openrouter_quantization == ["bf16"]
+
+    missing_model = parser.parse_args(["--provider", "openrouter"])
+    with pytest.raises(ValueError, match="--model is required"):
+        runner["resolve_provider_args"](missing_model)
+
 
 
 def test_openai_responses_tool_call_uses_responses_parameters() -> None:

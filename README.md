@@ -75,11 +75,11 @@ Training and evaluation use the same deterministic reward calculation. Serialize
 
 ## Evaluation Set
 
-The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 45 fixed puzzles:
+The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 30 fixed puzzles:
 
-- 15 easy puzzles;
-- 15 medium puzzles;
-- 15 hard puzzles.
+- 10 easy puzzles;
+- 10 medium puzzles;
+- 10 hard puzzles.
 
 The repository can also generate equivalent local JSONL and Parquet files:
 
@@ -118,6 +118,7 @@ DEEPSEEK_API_KEY=your_key_here
 ZAI_API_KEY=your_key_here
 OPENAI_API_KEY=your_key_here
 CROF_API_KEY=your_key_here
+OPENROUTER_API_KEY=your_key_here
 ```
 
 Run an evaluation:
@@ -150,6 +151,7 @@ Available providers:
 --provider crof
 --provider openai
 --provider qwen
+--provider openrouter
 ```
 
 ### Evaluating Qwen3.5 locally
@@ -209,6 +211,38 @@ Useful options include:
 --keep-reasoning     also include available reasoning; requires --keep-history
 --max-tokens N       set the response token budget
 ```
+
+
+### Evaluating through OpenRouter
+
+OpenRouter is useful for screening multiple hosted teacher models through one
+OpenAI-compatible endpoint. Supply an exact OpenRouter model slug, pin an
+upstream provider for reproducible finalist comparisons, and save trajectories:
+
+```bash
+uv run python scripts/run_eval_8puzzle.py \
+    --provider openrouter \
+    --model qwen/qwen3.5-27b \
+    --dataset data/eval_puzzles_3x3_45.jsonl \
+    --num-rollouts 4 \
+    --parallelism 4 \
+    --thinking \
+    --reasoning-effort low \
+    --max-tokens 2048 \
+    --openrouter-upstream novita \
+    --openrouter-quantization bf16 \
+    --openrouter-data-collection deny \
+    --openrouter-distillable-only \
+    --save-trajectories \
+    --output eval/openrouter-qwen3.5-27b.json
+```
+
+OpenRouter routing metadata, selected upstream provider, token usage, and cost
+are saved in each trajectory step. `--openrouter-upstream` and
+`--openrouter-quantization` may be repeated. Fallbacks are disabled by default;
+pass `--openrouter-allow-fallbacks` only for availability-oriented screening,
+not reproducible teacher comparisons.
+
 
 Run the tests with:
 

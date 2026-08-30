@@ -33,6 +33,8 @@ from evaluation.constants import (
     DEFAULT_OPENAI_API_KEY_ENV,
     DEFAULT_OPENAI_BASE_URL,
     DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_API_KEY_ENV,
+    DEFAULT_OPENROUTER_BASE_URL,
     DEFAULT_QWEN_BASE_URL,
     DEFAULT_QWEN_MODEL,
     DEFAULT_QWEN_PRESENCE_PENALTY,
@@ -53,17 +55,18 @@ from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
 from evaluation.clients.openai_client import OpenAIAgent
+from evaluation.clients.openrouter import OpenRouterAgent
 from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import get_api_key
 
 
-type ProviderAgent = CrofAgent | DeepSeekAgent | GLMAgent | OpenAIAgent | QwenAgent
+type ProviderAgent = CrofAgent | DeepSeekAgent | GLMAgent | OpenAIAgent | OpenRouterAgent | QwenAgent
 
 
 @dataclass(frozen=True)
 class ProviderConfig:
     agent_class: type[ProviderAgent]
-    default_model: str
+    default_model: str | None
     default_base_url: str
     default_api_key_env: str | None
     default_output: str
@@ -101,6 +104,14 @@ PROVIDERS = {
         DEFAULT_OPENAI_BASE_URL,
         DEFAULT_OPENAI_API_KEY_ENV,
         "results_8puzzle_openai.json",
+        DEFAULT_THINKING,
+    ),
+    "openrouter": ProviderConfig(
+        OpenRouterAgent,
+        None,
+        DEFAULT_OPENROUTER_BASE_URL,
+        DEFAULT_OPENROUTER_API_KEY_ENV,
+        "results_8puzzle_openrouter.json",
         DEFAULT_THINKING,
     ),
     "qwen": ProviderConfig(
@@ -183,6 +194,36 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REASONING_EFFORT,
     )
     parser.add_argument("--max-tokens", type=positive_int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument(
+        "--openrouter-upstream",
+        action="append",
+        default=[],
+        metavar="PROVIDER",
+        help="Restrict OpenRouter requests to this upstream provider; repeatable",
+    )
+    parser.add_argument(
+        "--openrouter-allow-fallbacks",
+        action="store_true",
+        help="Allow OpenRouter to retry a different provider after a failed request",
+    )
+    parser.add_argument(
+        "--openrouter-quantization",
+        action="append",
+        default=[],
+        metavar="QUANTIZATION",
+        help="Restrict OpenRouter endpoints to this quantization; repeatable",
+    )
+    parser.add_argument(
+        "--openrouter-data-collection",
+        choices=("allow", "deny"),
+        default="deny",
+        help="OpenRouter upstream data-collection policy (default: deny)",
+    )
+    parser.add_argument(
+        "--openrouter-distillable-only",
+        action="store_true",
+        help="Require OpenRouter endpoints that permit text distillation",
+    )
     parser.add_argument("--temperature", type=float, default=DEFAULT_QWEN_TEMPERATURE)
     parser.add_argument("--top-p", type=float, default=DEFAULT_QWEN_TOP_P)
     parser.add_argument("--top-k", type=positive_int, default=DEFAULT_QWEN_TOP_K)
@@ -218,19 +259,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Save complete episode/step traces to a separate JSON file",
     )
     return parser
-
-
 def resolve_provider_args(args: argparse.Namespace) -> None:
     provider = PROVIDERS[args.provider]
     args.model = args.model or provider.default_model
     args.base_url = args.base_url or provider.default_base_url
     args.api_key_env = args.api_key_env or provider.default_api_key_env
+    if args.provider == "openrouter" and args.model is None:
+        raise ValueError("--model is required for --provider openrouter")
     if args.thinking is None:
         args.thinking = provider.default_thinking
 
 
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
-    return {
+    result = {
         "dataset": args.dataset,
         "config": args.config,
         "split": args.split,
@@ -258,6 +299,18 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "distance_progress_weight": DISTANCE_PROGRESS_WEIGHT,
         "max_puzzle_distance": MAX_PUZZLE_DISTANCE,
     }
+    if args.provider == "openrouter":
+        result.update(
+            {
+                "openrouter_upstreams": args.openrouter_upstream,
+                "openrouter_allow_fallbacks": args.openrouter_allow_fallbacks,
+                "openrouter_require_parameters": True,
+                "openrouter_quantizations": args.openrouter_quantization,
+                "openrouter_data_collection": args.openrouter_data_collection,
+                "openrouter_distillable_only": args.openrouter_distillable_only,
+            }
+        )
+    return result
 
 
 def main() -> None:
@@ -302,6 +355,19 @@ def main() -> None:
                         "top_k": args.top_k,
                         "presence_penalty": args.presence_penalty,
                         "repetition_penalty": args.repetition_penalty,
+                    }
+                )
+            elif args.provider == "openrouter":
+                agent_kwargs.update(
+                    {
+                        "temperature": args.temperature,
+                        "top_p": args.top_p,
+                        "upstream_providers": args.openrouter_upstream,
+                        "allow_fallbacks": args.openrouter_allow_fallbacks,
+                        "require_parameters": True,
+                        "data_collection": args.openrouter_data_collection,
+                        "distillable_only": args.openrouter_distillable_only,
+                        "quantizations": args.openrouter_quantization,
                     }
                 )
             agent = provider.agent_class(**agent_kwargs)

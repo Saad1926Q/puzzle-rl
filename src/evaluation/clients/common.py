@@ -9,8 +9,8 @@ from evaluation.protocol import extract_chat_tool_tile, json_safe
 
 
 def validate_reasoning_effort(reasoning_effort: str) -> None:
-    if reasoning_effort not in {"low", "medium", "high", "max"}:
-        raise ValueError("reasoning_effort must be low, medium, high, or max")
+    if reasoning_effort not in {"low", "medium", "high", "max", "xhigh"}:
+        raise ValueError("reasoning_effort must be low, medium, high, max, or xhigh")
 
 
 def api_error_metadata(exc: Exception) -> dict[str, Any]:
