@@ -26,6 +26,7 @@ class HistoryTurn:
     board: Board
     tile: int
     reasoning: str = ""
+    reasoning_details: Any | None = None
 
 
 class PuzzleAgent(Protocol):
@@ -106,6 +107,29 @@ def build_chat_completion_messages(
                 "content": _board_prompt(next_board, after_action=True),
             }
         )
+    return messages
+
+
+def build_openrouter_chat_completion_messages(
+    board: Board,
+    history: Sequence[HistoryTurn] = (),
+    *,
+    include_reasoning: bool = False,
+) -> list[dict[str, Any]]:
+    """Build OpenRouter messages while preserving native reasoning fields."""
+
+    messages = build_chat_completion_messages(board, history)
+    if not include_reasoning:
+        return messages
+
+    assistant_messages = (
+        message for message in messages if message["role"] == "assistant"
+    )
+    for message, turn in zip(assistant_messages, history, strict=True):
+        if turn.reasoning_details:
+            message["reasoning_details"] = turn.reasoning_details
+        elif turn.reasoning:
+            message["reasoning"] = turn.reasoning
     return messages
 
 

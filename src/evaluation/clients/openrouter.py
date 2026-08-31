@@ -17,7 +17,11 @@ from evaluation.constants import (
     DEFAULT_THINKING,
     SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import HistoryTurn, build_chat_completion_messages, json_safe
+from evaluation.protocol import (
+    HistoryTurn,
+    build_openrouter_chat_completion_messages,
+    json_safe,
+)
 from puzzle3.board import Board
 
 
@@ -102,7 +106,7 @@ class OpenRouterAgent:
 
         request = {
             "model": self.model,
-            "messages": build_chat_completion_messages(
+            "messages": build_openrouter_chat_completion_messages(
                 board, history, include_reasoning=include_reasoning
             ),
             "tools": [SLIDE_TILE_TOOL],

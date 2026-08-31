@@ -22,6 +22,7 @@ from evaluation.clients.qwen import QwenAgent
 from evaluation.protocol import (
     HistoryTurn,
     build_chat_completion_messages,
+    build_openrouter_chat_completion_messages,
     build_openai_responses_input,
     get_api_key,
     parse_tile,
@@ -97,6 +98,53 @@ def test_messages_preserve_tool_protocol_and_optional_reasoning() -> None:
     )
     assert with_reasoning[2]["content"] == "Move right."
 
+
+
+def test_openrouter_messages_preserve_native_reasoning_fields() -> None:
+    reasoning_details = [
+        {"type": "reasoning.text", "text": "Native reasoning", "signature": "sig"}
+    ]
+    history = (
+        HistoryTurn(
+            (1, 2, 3, 4, 5, 6, 0, 7, 8),
+            tile=7,
+            reasoning="Plaintext fallback.",
+            reasoning_details=reasoning_details,
+        ),
+        HistoryTurn(
+            (1, 2, 3, 4, 5, 6, 7, 0, 8),
+            tile=8,
+            reasoning="Solve it.",
+        ),
+    )
+
+    messages = build_openrouter_chat_completion_messages(
+        GOAL, history, include_reasoning=True
+    )
+
+    assert messages[2]["content"] == ""
+    assert messages[2]["reasoning_details"] is reasoning_details
+    assert "reasoning" not in messages[2]
+    assert messages[4]["content"] == ""
+    assert messages[4]["reasoning"] == "Solve it."
+    assert "reasoning_details" not in messages[4]
+
+
+def test_openrouter_messages_omit_reasoning_when_not_requested() -> None:
+    history = (
+        HistoryTurn(
+            (1, 2, 3, 4, 5, 6, 7, 0, 8),
+            tile=8,
+            reasoning="Solve it.",
+            reasoning_details=[{"type": "reasoning.text", "text": "Solve it."}],
+        ),
+    )
+
+    message = build_openrouter_chat_completion_messages(GOAL, history)[2]
+
+    assert message["content"] == ""
+    assert "reasoning" not in message
+    assert "reasoning_details" not in message
 
 def test_responses_input_preserves_function_call_history() -> None:
     history = (HistoryTurn((1, 2, 3, 4, 5, 6, 7, 0, 8), tile=8),)
@@ -176,7 +224,8 @@ def test_history_retains_reasoning_only_when_requested() -> None:
         received_history: list[tuple[HistoryTurn, ...]] = field(default_factory=list)
 
         def __post_init__(self) -> None:
-            self.last_response_metadata: dict[str, str] = {}
+            self.last_response_metadata: dict[str, object] = {}
+
         def next_action(
             self,
             board: tuple[int, ...],
@@ -185,7 +234,12 @@ def test_history_retains_reasoning_only_when_requested() -> None:
             include_reasoning: bool,
         ) -> str:
             self.received_history.append(history)
-            self.last_response_metadata = {"reasoning_content": "Move toward goal."}
+            self.last_response_metadata = {
+                "reasoning_content": "Move toward goal.",
+                "reasoning_details": [
+                    {"type": "reasoning.text", "text": "Move toward goal."}
+                ],
+            }
             self.calls += 1
             return '{"tile": 7}' if self.calls == 1 else '{"tile": 4}'
 
@@ -199,6 +253,11 @@ def test_history_retains_reasoning_only_when_requested() -> None:
     )
 
     assert agent.received_history[1][0].reasoning == "Move toward goal."
+    assert agent.received_history[1][0].reasoning_details == [
+        {"type": "reasoning.text", "text": "Move toward goal."}
+    ]
+
+
 def test_reasoning_history_requires_history() -> None:
     with pytest.raises(ValueError, match="keep_reasoning requires keep_history"):
         evaluate_episode(
@@ -214,6 +273,7 @@ def _fake_response(
     finish_reason="tool_calls",
     reasoning=None,
     reasoning_content=None,
+    reasoning_details=None,
 ):
     message = type(
         "Message",
@@ -223,6 +283,7 @@ def _fake_response(
             "tool_calls": tool_calls,
             "reasoning": reasoning,
             "reasoning_content": reasoning_content,
+            "reasoning_details": reasoning_details,
         },
     )()
     choice = type("Choice", (), {"message": message, "finish_reason": finish_reason})()
@@ -310,6 +371,9 @@ def test_openrouter_sends_reproducible_routing_and_records_metadata() -> None:
             response = _fake_response(
                 tool_calls=_fake_tool_call('{"tile": 8}'),
                 reasoning_content="Slide tile 8.",
+                reasoning_details=[
+                    {"type": "reasoning.text", "text": "Slide tile 8."}
+                ],
             )
             response.id = "gen-test"
             response.model = "qwen/qwen3.5-27b"
@@ -351,6 +415,9 @@ def test_openrouter_sends_reproducible_routing_and_records_metadata() -> None:
     assert agent.last_response_metadata["response_id"] == "gen-test"
     assert agent.last_response_metadata["resolved_model"] == "qwen/qwen3.5-27b"
     assert agent.last_response_metadata["openrouter_metadata"]["attempt"] == 1
+    assert agent.last_response_metadata["reasoning_details"] == [
+        {"type": "reasoning.text", "text": "Slide tile 8."}
+    ]
 
 
 def test_openrouter_uses_reasoning_effort_when_enabled() -> None:

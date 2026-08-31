@@ -64,6 +64,7 @@ def parse_chat_response(
         getattr(message, "reasoning", None)
         or getattr(message, "reasoning_content", None)
     )
+    reasoning_details = json_safe(getattr(message, "reasoning_details", None))
     tile, tool_metadata = extract_chat_tool_tile(message)
     finish_reason = getattr(choice, "finish_reason", None)
     truncated = finish_reason in truncated_reasons
@@ -75,6 +76,7 @@ def parse_chat_response(
         "content": content,
         "content_length": len(content),
         **empty_reasoning_metadata(reasoning),
+        "reasoning_details": reasoning_details,
         "truncated": truncated,
         **tool_metadata,
         "usage": json_safe(getattr(response, "usage", None)),

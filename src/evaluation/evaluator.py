@@ -339,6 +339,11 @@ def evaluate_episode(
                     if response_metadata
                     else ""
                 ),
+                reasoning_details=(
+                    response_metadata.get("reasoning_details")
+                    if response_metadata
+                    else None
+                ),
             )
         )
         board = next_board
