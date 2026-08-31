@@ -29,11 +29,17 @@ DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_THINKING = True
 
 SYSTEM_PROMPT = """You solve one 3x3 sliding puzzle one move at a time.
-The solved board is 1 2 3 / 4 5 6 / 7 8 0. On each turn, choose one numbered
-tile adjacent to the blank (0) and slide that tile into the blank. Call
-slide_tile exactly once with that tile's number. Do not submit the blank, a
-non-adjacent tile, a plan, or a list of tiles. The latest board observation is
-authoritative; retained history is supplementary context."""
+The solved board is 1 2 3 / 4 5 6 / 7 8 0. On each turn, slide one numbered
+tile adjacent to the blank (0) into the blank by calling slide_tile exactly
+once with that tile's number. Only a tile directly adjacent to the blank is a
+legal move; the blank itself, a non-adjacent tile, or more than one tile per
+turn is illegal and will be rejected. Think concisely about the current move,
+then call slide_tile."""
+
+SYSTEM_PROMPT_WITH_HISTORY = SYSTEM_PROMPT + (
+    "\nThe latest board observation is authoritative; retained history is "
+    "supplementary context."
+)
 
 SLIDE_TILE_TOOL = {
     "type": "function",

@@ -99,7 +99,14 @@ class EvaluationResult:
         }
         outcomes = {
             outcome: sum(e.outcome == outcome for e in self.episodes)
-            for outcome in ("solved", "illegal", "malformed", "truncated", "timeout")
+            for outcome in (
+                "solved",
+                "illegal",
+                "malformed",
+                "truncated",
+                "timeout",
+                "api_error",
+            )
         }
         return {
             "num_examples": num_examples,
@@ -110,11 +117,13 @@ class EvaluationResult:
             "malformed": outcomes["malformed"],
             "truncated": outcomes["truncated"],
             "timeout": outcomes["timeout"],
+            "api_error": outcomes["api_error"],
             "solved_rate": outcomes["solved"] / count if count else 0.0,
             "illegal_rate": outcomes["illegal"] / count if count else 0.0,
             "malformed_rate": outcomes["malformed"] / count if count else 0.0,
             "truncated_rate": outcomes["truncated"] / count if count else 0.0,
             "timeout_rate": outcomes["timeout"] / count if count else 0.0,
+            "api_error_rate": outcomes["api_error"] / count if count else 0.0,
             # pass@k is the fraction of distinct puzzles solved by at least one
             # of the k independent rollouts.
             "pass@k": len(solved_examples) / num_examples if num_examples else 0.0,
@@ -175,6 +184,7 @@ def _failed_episode(
     outcome: str,
     response_metadata: dict[str, Any] | None,
     steps: list[StepResult],
+    terminal_reward: float = ILLEGAL_OR_MALFORMED_REWARD,
 ) -> EpisodeResult:
     steps.append(
         StepResult(
@@ -186,8 +196,8 @@ def _failed_episode(
             next_board=None,
             status=outcome,
             response_metadata=response_metadata,
-            reward=ILLEGAL_OR_MALFORMED_REWARD,
-            terminal_reward=ILLEGAL_OR_MALFORMED_REWARD,
+            reward=terminal_reward,
+            terminal_reward=terminal_reward,
         )
     )
     return EpisodeResult(
@@ -239,15 +249,33 @@ def evaluate_episode(
 
     for turn in range(1, max_turns + 1):
         available = adjacent_tiles(board)
-        raw_response = (
-            agent.next_action(
-                board,
-                history[-4:],
-                include_reasoning=keep_reasoning,
+        try:
+            raw_response = (
+                agent.next_action(
+                    board,
+                    history[-4:],
+                    include_reasoning=keep_reasoning,
+                )
+                if keep_history
+                else agent.next_action(board)
             )
-            if keep_history
-            else agent.next_action(board)
-        )
+        except Exception:
+            response_metadata = getattr(agent, "last_response_metadata", None)
+            if not response_metadata or response_metadata.get("status") != "api_error":
+                raise
+            return _failed_episode(
+                example=example,
+                rollout_id=rollout_id,
+                turn=turn,
+                board=board,
+                legal_tiles=available,
+                raw_response=None,
+                tile=None,
+                outcome="api_error",
+                response_metadata=response_metadata,
+                steps=steps,
+                terminal_reward=0.0,
+            )
         response_metadata = getattr(agent, "last_response_metadata", None)
         tile = parse_tile(raw_response)
         if tile is None:

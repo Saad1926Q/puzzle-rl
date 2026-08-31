@@ -10,7 +10,11 @@ from typing import Any, Protocol, Sequence
 
 from dotenv import load_dotenv
 
-from evaluation.constants import DEFAULT_API_KEY_ENV, SYSTEM_PROMPT
+from evaluation.constants import (
+    DEFAULT_API_KEY_ENV,
+    SYSTEM_PROMPT,
+    SYSTEM_PROMPT_WITH_HISTORY,
+)
 from puzzle3.board import Board
 from puzzle3.render import render
 
@@ -65,7 +69,12 @@ def build_chat_completion_messages(
     ``build_openai_responses_input`` for that client.
     """
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT_WITH_HISTORY if history else SYSTEM_PROMPT,
+        }
+    ]
     if not history:
         messages.append({"role": "user", "content": _board_prompt(board)})
         return messages
@@ -117,7 +126,7 @@ def build_openai_responses_input(
         return build_chat_completion_messages(board)
 
     items: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT_WITH_HISTORY},
         {"role": "user", "content": _board_prompt(history[0].board)},
     ]
     for index, turn in enumerate(history):

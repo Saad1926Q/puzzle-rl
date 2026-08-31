@@ -93,7 +93,7 @@ The generator exhaustively searches the solvable state space, groups puzzles by 
 
 Evaluation reports:
 
-- solved, illegal, malformed, truncated, and timeout rates;
+- solved, illegal, malformed, truncated, timeout, and API-error rates;
 - mean episode reward;
 - mean moves taken;
 - solution efficiency;

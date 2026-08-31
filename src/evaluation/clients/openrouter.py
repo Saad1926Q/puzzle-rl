@@ -1,6 +1,8 @@
 """OpenRouter Chat Completions client for reproducible teacher evaluations."""
 
 from __future__ import annotations
+from time import sleep
+
 
 from typing import Any, Sequence
 
@@ -12,7 +14,6 @@ from evaluation.clients.common import (
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_OPENROUTER_BASE_URL,
-    DEFAULT_REASONING_EFFORT,
     DEFAULT_THINKING,
     SLIDE_TILE_TOOL,
 )
@@ -30,7 +31,7 @@ class OpenRouterAgent:
         model: str,
         base_url: str = DEFAULT_OPENROUTER_BASE_URL,
         thinking: bool = DEFAULT_THINKING,
-        reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+        reasoning_effort: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 1.0,
         top_p: float = 1.0,
@@ -40,6 +41,8 @@ class OpenRouterAgent:
         data_collection: str = "deny",
         distillable_only: bool = False,
         quantizations: Sequence[str] = (),
+        provider_retries: int = 2,
+        retry_delay: float = 1.0,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -53,9 +56,14 @@ class OpenRouterAgent:
                     "X-OpenRouter-Title": "puzzle-rl",
                 },
             )
-        validate_reasoning_effort(reasoning_effort)
+        if reasoning_effort is not None:
+            validate_reasoning_effort(reasoning_effort)
         if data_collection not in {"allow", "deny"}:
             raise ValueError("data_collection must be allow or deny")
+        if provider_retries < 0:
+            raise ValueError("provider_retries must be non-negative")
+        if retry_delay < 0:
+            raise ValueError("retry_delay must be non-negative")
         self.client = client
         self.model = model
         self.thinking = thinking
@@ -69,6 +77,8 @@ class OpenRouterAgent:
         self.data_collection = data_collection
         self.distillable_only = distillable_only
         self.quantizations = tuple(quantizations)
+        self.provider_retries = provider_retries
+        self.retry_delay = retry_delay
         self.last_response_metadata: dict[str, Any] = {}
 
     def next_action(
@@ -101,18 +111,30 @@ class OpenRouterAgent:
             "temperature": self.temperature,
             "top_p": self.top_p,
             "extra_body": {
-                "reasoning": {
-                    "effort": self.reasoning_effort if self.thinking else "none",
-                    "exclude": False,
-                },
+                "reasoning": (
+                    {
+                        "enabled": True,
+                        "exclude": False,
+                    }
+                    if self.thinking and self.reasoning_effort is None
+                    else {
+                        "effort": self.reasoning_effort if self.thinking else "none",
+                        "exclude": False,
+                    }
+                ),
                 "provider": provider,
             },
         }
-        try:
-            response = self.client.chat.completions.create(**request)
-        except Exception as exc:
-            self.last_response_metadata = api_error_metadata(exc)
-            raise
+        for attempt in range(self.provider_retries + 1):
+            try:
+                response = self.client.chat.completions.create(**request)
+                break
+            except Exception as exc:
+                if attempt < self.provider_retries and _is_retryable_provider_error(exc):
+                    sleep(self.retry_delay * (attempt + 1))
+                    continue
+                self.last_response_metadata = api_error_metadata(exc)
+                raise
         try:
             result, response_metadata = parse_chat_response(
                 response,
@@ -147,3 +169,17 @@ def _response_field(response: Any, name: str) -> Any:
     if isinstance(model_extra, dict):
         return model_extra.get(name)
     return None
+
+
+def _is_retryable_provider_error(exc: Exception) -> bool:
+    """Identify transport and upstream-provider failures worth retrying."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429} or (
+        isinstance(status_code, int) and status_code >= 500
+    ):
+        return True
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error", body)
+    return isinstance(error, dict) and error.get("message") == "Provider returned error"

@@ -190,8 +190,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(thinking=None)
     parser.add_argument(
         "--reasoning-effort",
-        choices=("low", "medium", "high", "max", "xhigh"),
-        default=DEFAULT_REASONING_EFFORT,
+        choices=("minimal", "low", "medium", "high", "max", "xhigh"),
+        default=None,
+        help="Reasoning effort override; omit to use the provider default",
     )
     parser.add_argument("--max-tokens", type=positive_int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument(
@@ -268,6 +269,8 @@ def resolve_provider_args(args: argparse.Namespace) -> None:
         raise ValueError("--model is required for --provider openrouter")
     if args.thinking is None:
         args.thinking = provider.default_thinking
+    if args.reasoning_effort is None and args.provider != "openrouter":
+        args.reasoning_effort = DEFAULT_REASONING_EFFORT
 
 
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:

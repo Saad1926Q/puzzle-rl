@@ -375,6 +375,57 @@ def test_openrouter_uses_reasoning_effort_when_enabled() -> None:
         "exclude": False,
     }
 
+
+def test_openrouter_uses_provider_default_effort_when_unspecified() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        client=client,
+    ).next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
+
+    assert completions.kwargs["extra_body"]["reasoning"] == {
+        "enabled": True,
+        "exclude": False,
+    }
+
+
+def test_openrouter_retries_an_upstream_provider_error() -> None:
+    class ProviderError(RuntimeError):
+        status_code = 400
+        body = {"error": {"message": "Provider returned error"}}
+
+    class Completions:
+        calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("upstream rejected request")
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        client=client,
+        retry_delay=0,
+    )
+
+    assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
+    assert completions.calls == 2
+
 def test_deepseek_strict_tool_call_is_canonicalized() -> None:
     class Completions:
         def create(self, **kwargs):
@@ -541,6 +592,7 @@ def test_openrouter_cli_requires_model_and_uses_reproducible_defaults() -> None:
     assert args.openrouter_data_collection == "deny"
     assert args.openrouter_upstream == ["together"]
     assert args.openrouter_quantization == ["bf16"]
+    assert args.reasoning_effort is None
 
     missing_model = parser.parse_args(["--provider", "openrouter"])
     with pytest.raises(ValueError, match="--model is required"):
@@ -683,6 +735,30 @@ def test_deepseek_provider_error_is_not_relabelled_as_malformed() -> None:
     with pytest.raises(RuntimeError, match="provider unavailable"):
         agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))
     assert agent.last_response_metadata["status"] == "api_error"
+
+
+def test_evaluation_records_api_error_without_aborting_other_rollouts() -> None:
+    class APIErrorAgent:
+        last_response_metadata: dict[str, object] = {}
+
+        def next_action(self, board):
+            self.last_response_metadata = {
+                "status": "api_error",
+                "error_type": "BadRequestError",
+                "status_code": 400,
+            }
+            raise RuntimeError("provider unavailable")
+
+    result = evaluate(
+        [example((1, 2, 3, 4, 5, 6, 7, 0, 8))],
+        APIErrorAgent(),
+        num_rollouts=2,
+    )
+
+    assert len(result.episodes) == 2
+    assert result.summary()["api_error"] == 2
+    assert result.summary()["api_error_rate"] == 1.0
+    assert result.summary()["mean_reward"] == 0.0
 
 
 def test_deepseek_adapter_starts_a_fresh_request_each_turn() -> None:
