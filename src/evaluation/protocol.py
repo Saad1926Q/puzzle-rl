@@ -10,7 +10,11 @@ from typing import Any, Protocol, Sequence
 
 from dotenv import load_dotenv
 
-from evaluation.constants import DEFAULT_API_KEY_ENV, SYSTEM_PROMPT
+from evaluation.constants import (
+    DEFAULT_API_KEY_ENV,
+    SYSTEM_PROMPT,
+    SYSTEM_PROMPT_WITH_HISTORY,
+)
 from puzzle3.board import Board
 from puzzle3.render import render
 
@@ -58,7 +62,6 @@ def build_chat_completion_messages(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
-    system_prompt: str = SYSTEM_PROMPT,
 ) -> list[dict[str, Any]]:
     """Build the Chat Completions wire format used by Crof, GLM, DeepSeek, and Qwen.
 
@@ -70,7 +73,7 @@ def build_chat_completion_messages(
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": system_prompt,
+            "content": SYSTEM_PROMPT_WITH_HISTORY if history else SYSTEM_PROMPT,
         }
     ]
     if not history:
@@ -112,13 +115,10 @@ def build_openrouter_chat_completion_messages(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
-    system_prompt: str = SYSTEM_PROMPT,
 ) -> list[dict[str, Any]]:
     """Build OpenRouter messages while preserving native reasoning fields."""
 
-    messages = build_chat_completion_messages(
-        board, history, system_prompt=system_prompt
-    )
+    messages = build_chat_completion_messages(board, history)
     if not include_reasoning:
         return messages
 
@@ -138,7 +138,6 @@ def build_openai_responses_input(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
-    system_prompt: str = SYSTEM_PROMPT,
 ) -> list[dict[str, Any]]:
     """Build the OpenAI Responses API wire format for the same puzzle context.
 
@@ -148,10 +147,10 @@ def build_openai_responses_input(
     """
 
     if not history:
-        return build_chat_completion_messages(board, system_prompt=system_prompt)
+        return build_chat_completion_messages(board)
 
     items: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": SYSTEM_PROMPT_WITH_HISTORY},
         {"role": "user", "content": _board_prompt(history[0].board)},
     ]
     for index, turn in enumerate(history):

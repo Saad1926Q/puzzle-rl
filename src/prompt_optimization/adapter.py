@@ -7,10 +7,10 @@ from typing import Any
 
 from gepa.core.adapter import EvaluationBatch
 
-from evaluation.constants import FIXED_SYSTEM_PROMPT
 from evaluation.dataset import PuzzleExample
-from evaluation.evaluator import EpisodeResult, evaluate_episode
-from evaluation.protocol import PuzzleAgent
+from prompt_optimization.eval.constants import build_candidate_system_prompt
+from prompt_optimization.eval.evaluator import EpisodeResult, evaluate_episode
+from prompt_optimization.eval.protocol import PuzzleAgent
 from prompt_optimization.feedback import episode_reflection_record
 
 STRATEGY_COMPONENT = "strategy_prompt"
@@ -39,10 +39,7 @@ class PuzzleGEPAAdapter:
     def system_prompt(strategy_prompt: str) -> str:
         """Build the only prompt text supplied to a rollout agent."""
 
-        strategy = strategy_prompt.strip()
-        if not strategy:
-            raise ValueError("strategy_prompt must not be empty")
-        return f"{FIXED_SYSTEM_PROMPT}\n{strategy}"
+        return build_candidate_system_prompt(strategy_prompt)
 
     def evaluate(
         self,

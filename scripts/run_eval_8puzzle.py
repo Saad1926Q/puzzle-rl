@@ -48,7 +48,6 @@ from evaluation.constants import (
     MAX_PUZZLE_DISTANCE,
     MAX_TURNS,
     REWARD_SCHEME,
-    build_system_prompt,
 )
 from evaluation.dataset import load_examples
 from evaluation.evaluator import EvaluationResult, evaluate
@@ -248,12 +247,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include saved reasoning in history; requires --keep-history",
     )
     parser.add_argument(
-        "--strategy-prompt-file",
-        type=Path,
-        default=None,
-        help="Replace the default strategy guidance for OpenRouter evaluations",
-    )
-    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -303,9 +296,6 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "repetition_penalty": args.repetition_penalty,
         "keep_history": args.keep_history,
         "keep_reasoning": args.keep_reasoning,
-        "strategy_prompt_file": (
-            str(args.strategy_prompt_file) if args.strategy_prompt_file else None
-        ),
         "save_trajectories": args.save_trajectories,
         "action_interface": ACTION_INTERFACE,
         "reward_scheme": REWARD_SCHEME,
@@ -331,8 +321,6 @@ def main() -> None:
     resolve_provider_args(args)
     if args.keep_reasoning and not args.keep_history:
         raise ValueError("--keep-reasoning requires --keep-history")
-    if args.strategy_prompt_file is not None and args.provider != "openrouter":
-        raise ValueError("--strategy-prompt-file currently requires --provider openrouter")
     provider = PROVIDERS[args.provider]
     if args.output is None:
         args.output = Path("eval") / provider.default_output
@@ -349,13 +337,6 @@ def main() -> None:
         if args.api_key_env is not None
         else "not-required"
     )
-    strategy_prompt = (
-        args.strategy_prompt_file.read_text(encoding="utf-8").strip()
-        if args.strategy_prompt_file is not None
-        else None
-    )
-    if strategy_prompt == "":
-        raise ValueError("--strategy-prompt-file must not be empty")
     worker_local = threading.local()
 
     def agent_factory() -> ProviderAgent:
@@ -392,8 +373,6 @@ def main() -> None:
                         "quantizations": args.openrouter_quantization,
                     }
                 )
-                if strategy_prompt is not None:
-                    agent_kwargs["system_prompt"] = build_system_prompt(strategy_prompt)
             agent = provider.agent_class(**agent_kwargs)
             worker_local.agent = agent
         return agent

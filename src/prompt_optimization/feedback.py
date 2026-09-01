@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from evaluation.evaluator import EpisodeResult
+from prompt_optimization.eval.evaluator import EpisodeResult
 from puzzle3.solver import exact_distance
 
 _MAX_REASONING_CHARS = 1_200

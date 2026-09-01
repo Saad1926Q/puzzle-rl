@@ -8,18 +8,18 @@ from pathlib import Path
 
 import gepa
 
-from evaluation.clients.openrouter import OpenRouterAgent
-from evaluation.constants import (
+from prompt_optimization.adapter import PuzzleGEPAAdapter, STRATEGY_COMPONENT
+from prompt_optimization.dataset import GEPASplits
+from prompt_optimization.eval.client import OpenRouterAgent
+from prompt_optimization.eval.constants import (
     DEFAULT_MAX_TOKENS,
-    DEFAULT_MAX_TURNS,
     DEFAULT_OPENROUTER_API_KEY_ENV,
     DEFAULT_OPENROUTER_BASE_URL,
     DEFAULT_THINKING,
+    MAX_TURNS,
     SEED_STRATEGY_PROMPT,
 )
-from evaluation.protocol import get_api_key
-from prompt_optimization.adapter import PuzzleGEPAAdapter, STRATEGY_COMPONENT
-from prompt_optimization.dataset import GEPASplits
+from prompt_optimization.eval.protocol import get_api_key
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class OpenRouterRolloutConfig:
     data_collection: str = "deny"
     distillable_only: bool = False
     quantizations: tuple[str, ...] = ()
-    max_turns: int = DEFAULT_MAX_TURNS
+    max_turns: int = MAX_TURNS
     keep_history: bool = True
     keep_reasoning: bool = True
 
