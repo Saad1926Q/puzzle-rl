@@ -54,7 +54,7 @@ def episode_reflection_record(episode: EpisodeResult) -> dict[str, Any]:
     """Return reflection evidence without disclosing any optimal action sequence."""
 
     boards = [episode.example.board]
-    boards.extend(step.next_board for step in episode.steps if step.next_board is not None)
+    boards.extend(step.next_board or step.board for step in episode.steps)
     distances = [exact_distance(board) for board in boards]
     progress = [step.progress_reward for step in episode.steps]
     tiles = [step.tile for step in episode.steps]

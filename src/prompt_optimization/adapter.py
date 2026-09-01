@@ -20,6 +20,8 @@ AgentFactory = Callable[[str], PuzzleAgent]
 class PuzzleGEPAAdapter:
     """Evaluate GEPA candidates using the authoritative multi-turn evaluator."""
 
+    propose_new_texts = None
+
     def __init__(
         self,
         *,
