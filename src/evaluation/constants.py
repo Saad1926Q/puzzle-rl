@@ -28,18 +28,29 @@ DEFAULT_MAX_TOKENS = 4096
 DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_THINKING = True
 
-SYSTEM_PROMPT = """You solve one 3x3 sliding puzzle one move at a time.
+FIXED_SYSTEM_PROMPT = """You solve one 3x3 sliding puzzle one move at a time.
 The solved board is 1 2 3 / 4 5 6 / 7 8 0. On each turn, slide one numbered
 tile adjacent to the blank (0) into the blank by calling slide_tile exactly
 once with that tile's number. Only a tile directly adjacent to the blank is a
 legal move; the blank itself, a non-adjacent tile, or more than one tile per
-turn is illegal and will be rejected. Think concisely about the current move,
-then call slide_tile."""
+turn is illegal and will be rejected."""
 
-SYSTEM_PROMPT_WITH_HISTORY = SYSTEM_PROMPT + (
-    "\nThe latest board observation is authoritative; retained history is "
-    "supplementary context."
-)
+SEED_STRATEGY_PROMPT = """Think concisely about the current move, then call
+slide_tile. Treat the latest board returned by the environment as authoritative;
+retained history is supplementary context."""
+
+
+def build_system_prompt(strategy_prompt: str = SEED_STRATEGY_PROMPT) -> str:
+    """Combine immutable environment rules with mutable strategy guidance."""
+
+    strategy = strategy_prompt.strip()
+    if not strategy:
+        raise ValueError("strategy_prompt must not be empty")
+    return f"{FIXED_SYSTEM_PROMPT}\n{strategy}"
+
+
+SYSTEM_PROMPT = build_system_prompt()
+SYSTEM_PROMPT_WITH_HISTORY = SYSTEM_PROMPT
 
 SLIDE_TILE_TOOL = {
     "type": "function",

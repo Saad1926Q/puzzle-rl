@@ -16,6 +16,7 @@ from evaluation.constants import (
     DEFAULT_OPENROUTER_BASE_URL,
     DEFAULT_THINKING,
     SLIDE_TILE_TOOL,
+    SYSTEM_PROMPT,
 )
 from evaluation.protocol import (
     HistoryTurn,
@@ -45,6 +46,7 @@ class OpenRouterAgent:
         data_collection: str = "deny",
         distillable_only: bool = False,
         quantizations: Sequence[str] = (),
+        system_prompt: str = SYSTEM_PROMPT,
         provider_retries: int = 2,
         retry_delay: float = 1.0,
         client: Any | None = None,
@@ -81,6 +83,7 @@ class OpenRouterAgent:
         self.data_collection = data_collection
         self.distillable_only = distillable_only
         self.quantizations = tuple(quantizations)
+        self.system_prompt = system_prompt
         self.provider_retries = provider_retries
         self.retry_delay = retry_delay
         self.last_response_metadata: dict[str, Any] = {}
@@ -107,7 +110,10 @@ class OpenRouterAgent:
         request = {
             "model": self.model,
             "messages": build_openrouter_chat_completion_messages(
-                board, history, include_reasoning=include_reasoning
+                board,
+                history,
+                include_reasoning=include_reasoning,
+                system_prompt=self.system_prompt,
             ),
             "tools": [SLIDE_TILE_TOOL],
             "tool_choice": "auto",
