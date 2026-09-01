@@ -4,9 +4,12 @@ import json
 
 import gepa
 
+from evaluation.constants import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_HISTORY
 from evaluation.dataset import PuzzleExample
-from evaluation.evaluator import evaluate_episode
+from evaluation.evaluator import evaluate_episode as canonical_evaluate_episode
 from prompt_optimization.adapter import PuzzleGEPAAdapter, STRATEGY_COMPONENT
+from prompt_optimization.eval.evaluator import evaluate_episode
+from prompt_optimization.eval.protocol import HistoryTurn, build_messages
 from prompt_optimization.feedback import episode_reflection_record
 
 
@@ -49,7 +52,7 @@ def test_adapter_injects_only_candidate_strategy_and_uses_native_reward() -> Non
         [example()], {STRATEGY_COMPONENT: "Use a short verified plan."}, capture_traces=True
     )
 
-    direct = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
+    direct = canonical_evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
     assert batch.scores == [direct.reward]
     assert batch.trajectories == batch.outputs
     assert prompts == [
@@ -108,3 +111,28 @@ def test_gepa_smoke_mutates_external_strategy_with_fake_agents(tmp_path) -> None
 
     assert result.num_candidates >= 2
     assert result.best_candidate[STRATEGY_COMPONENT] == "Use an improved short plan."
+
+
+def test_isolated_rollout_keeps_canonical_history_prompt_unchanged() -> None:
+    history = (HistoryTurn(example().board, tile=8),)
+    messages = build_messages(
+        example().board,
+        "Isolated candidate strategy.",
+        history,
+    )
+
+    assert SYSTEM_PROMPT_WITH_HISTORY == SYSTEM_PROMPT + (
+        "\nThe latest board observation is authoritative; retained history is "
+        "supplementary context."
+    )
+    assert messages[0]["content"] == "Isolated candidate strategy."
+    assert messages[1]["role"] == "user"
+
+
+def test_isolated_reward_semantics_match_canonical_evaluator() -> None:
+    isolated = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
+    canonical = canonical_evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
+
+    assert isolated.reward == canonical.reward
+    assert isolated.outcome == canonical.outcome
+    assert isolated.moves_taken == canonical.moves_taken
