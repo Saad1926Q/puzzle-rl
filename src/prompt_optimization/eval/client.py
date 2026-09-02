@@ -199,4 +199,17 @@ def _api_error_metadata(exc: Exception) -> dict[str, Any]:
 
 def _retryable(exc: Exception) -> bool:
     status = getattr(exc, "status_code", None)
-    return status in {408, 409, 429} or isinstance(status, int) and status >= 500
+    if status in {408, 409, 429} or isinstance(status, int) and status >= 500:
+        return True
+    if type(exc).__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "ConnectError",
+        "ReadTimeout",
+    }:
+        return True
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error", body)
+    return isinstance(error, dict) and error.get("message") == "Provider returned error"

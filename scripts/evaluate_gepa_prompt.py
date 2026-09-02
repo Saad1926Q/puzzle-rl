@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from tqdm import tqdm
 
 from prompt_optimization.dataset import DEFAULT_GEPA_CONFIG, load_gepa_splits
 from prompt_optimization.eval.client import OpenRouterAgent
@@ -29,6 +31,13 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if not parsed > 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--strategy-prompt-file", type=Path, required=True)
@@ -38,6 +47,13 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--split", choices=("train", "validation", "test"), default="test")
     result.add_argument("--api-key-env", default=DEFAULT_OPENROUTER_API_KEY_ENV)
     result.add_argument("--base-url", default=DEFAULT_OPENROUTER_BASE_URL)
+    result.add_argument("--openrouter-upstream", action="append", default=[])
+    result.add_argument("--openrouter-quantization", action="append", default=[])
+    result.add_argument("--openrouter-allow-fallbacks", action="store_true")
+    result.add_argument(
+        "--openrouter-data-collection", choices=("allow", "deny"), default="deny"
+    )
+    result.add_argument("--openrouter-distillable-only", action="store_true")
     result.add_argument("--thinking", action=argparse.BooleanOptionalAction, default=True)
     result.add_argument("--reasoning-effort", default=None)
     result.add_argument("--max-tokens", type=positive_int, default=DEFAULT_MAX_TOKENS)
@@ -46,6 +62,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--top-p", type=float, default=1.0)
     result.add_argument("--num-rollouts", type=positive_int, default=4)
     result.add_argument("--parallelism", type=positive_int, default=4)
+    result.add_argument("--request-timeout", type=positive_float, default=120.0)
     result.add_argument("--keep-history", action=argparse.BooleanOptionalAction, default=True)
     result.add_argument("--keep-reasoning", action=argparse.BooleanOptionalAction, default=True)
     result.add_argument("--output", type=Path, required=True)
@@ -101,9 +118,16 @@ def main() -> None:
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
+        upstream_providers=tuple(args.openrouter_upstream),
+        allow_fallbacks=args.openrouter_allow_fallbacks,
+        data_collection=args.openrouter_data_collection,
+        distillable_only=args.openrouter_distillable_only,
+        quantizations=tuple(args.openrouter_quantization),
         max_turns=args.max_turns,
         keep_history=args.keep_history,
         keep_reasoning=args.keep_reasoning,
+        parallelism=args.parallelism,
+        request_timeout=args.request_timeout,
     )
 
     def rollout(index: int, example) -> EpisodeResult:
@@ -117,6 +141,12 @@ def main() -> None:
             max_tokens=config.max_tokens,
             temperature=config.temperature,
             top_p=config.top_p,
+            upstream_providers=config.upstream_providers,
+            allow_fallbacks=config.allow_fallbacks,
+            data_collection=config.data_collection,
+            distillable_only=config.distillable_only,
+            quantizations=config.quantizations,
+            request_timeout=config.request_timeout,
         )
         result = evaluate_episode(
             example,
@@ -129,14 +159,26 @@ def main() -> None:
         return result
 
     jobs = [(rollout_id, example) for example in examples for rollout_id in range(args.num_rollouts)]
-    with ThreadPoolExecutor(max_workers=args.parallelism) as executor:
-        episodes = list(executor.map(lambda job: rollout(*job), jobs))
-    solved = [episode for episode in episodes if episode.outcome == "solved"]
+    episodes: list[EpisodeResult | None] = [None] * len(jobs)
+    with (
+        ThreadPoolExecutor(max_workers=min(args.parallelism, len(jobs))) as executor,
+        tqdm(total=len(jobs), desc="Puzzle rollouts", unit="episode") as progress,
+    ):
+        future_indices: dict[Future[EpisodeResult], int] = {
+            executor.submit(rollout, *job): index for index, job in enumerate(jobs)
+        }
+        for future in as_completed(future_indices):
+            episodes[future_indices[future]] = future.result()
+            progress.update(1)
+    completed = [episode for episode in episodes if episode is not None]
+    if len(completed) != len(jobs):
+        raise RuntimeError("not all puzzle rollouts produced a result")
+    solved = [episode for episode in completed if episode.outcome == "solved"]
     summary = {
-        "num_episodes": len(episodes),
+        "num_episodes": len(completed),
         "solved": len(solved),
-        "solved_rate": len(solved) / len(episodes),
-        "mean_reward": sum(episode.reward for episode in episodes) / len(episodes),
+        "solved_rate": len(solved) / len(completed),
+        "mean_reward": sum(episode.reward for episode in completed) / len(completed),
     }
     output = {
         "metadata": {
@@ -147,7 +189,7 @@ def main() -> None:
             "rollout": config.__dict__,
         },
         "summary": summary,
-        "episodes": [episode_dict(episode) for episode in episodes],
+        "episodes": [episode_dict(episode) for episode in completed],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")

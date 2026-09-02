@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from math import isfinite
 from pathlib import Path
 
 import gepa
@@ -44,6 +45,36 @@ class OpenRouterRolloutConfig:
     keep_reasoning: bool = True
     parallelism: int = 8
     request_timeout: float = 120.0
+
+    def __post_init__(self) -> None:
+        if not self.model.strip():
+            raise ValueError("model must not be empty")
+        if self.reasoning_effort not in {
+            None,
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max",
+            "xhigh",
+        }:
+            raise ValueError("invalid reasoning_effort")
+        if self.max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
+        if not 1 <= self.max_turns <= MAX_TURNS:
+            raise ValueError(f"max_turns must be between 1 and {MAX_TURNS}")
+        if self.parallelism <= 0:
+            raise ValueError("parallelism must be positive")
+        if not isfinite(self.request_timeout) or self.request_timeout <= 0:
+            raise ValueError("request_timeout must be finite and positive")
+        if not isfinite(self.temperature) or self.temperature < 0:
+            raise ValueError("temperature must be finite and non-negative")
+        if not isfinite(self.top_p) or not 0 < self.top_p <= 1:
+            raise ValueError("top_p must be finite and in (0, 1]")
+        if self.data_collection not in {"allow", "deny"}:
+            raise ValueError("data_collection must be allow or deny")
+        if self.keep_reasoning and not self.keep_history:
+            raise ValueError("keep_reasoning requires keep_history")
 
 
 def run_gepa_optimization(

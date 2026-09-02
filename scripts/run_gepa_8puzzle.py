@@ -19,6 +19,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if not parsed > 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
 def _max_turns(value: str) -> int:
     parsed = _positive_int(value)
     if parsed > DEFAULT_MAX_TURNS:
@@ -56,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-history", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--keep-reasoning", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--parallelism", type=_positive_int, default=8)
-    parser.add_argument("--request-timeout", type=float, default=120.0)
+    parser.add_argument("--request-timeout", type=_positive_float, default=120.0)
     parser.add_argument("--max-metric-calls", type=_positive_int, default=120)
     parser.add_argument("--reflection-minibatch-size", type=_positive_int, default=3)
     parser.add_argument("--seed", type=int, default=42)

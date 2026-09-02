@@ -21,6 +21,9 @@ def _completion_tokens(metadata: dict[str, Any] | None) -> int:
 
 def _reasoning_excerpts(episode: EpisodeResult, distances: list[int]) -> list[dict[str, Any]]:
     """Select high-signal model reasoning rather than serializing whole episodes."""
+    if not episode.steps:
+        return []
+
 
     selected = {0, len(episode.steps) - 1}
     for index, step in enumerate(episode.steps):

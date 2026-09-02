@@ -80,7 +80,14 @@ def _failed(
         reward=terminal_reward,
         terminal_reward=terminal_reward,
     ))
-    return EpisodeResult(example, outcome, sum(step.reward for step in steps), turn - 1 if tile is None else turn, board, steps)
+    return EpisodeResult(
+        example,
+        outcome,
+        sum(step.reward for step in steps),
+        turn - 1,
+        board,
+        steps,
+    )
 
 
 def evaluate_episode(

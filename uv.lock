@@ -1897,7 +1897,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.14.0" },
     { name = "datasets", specifier = ">=4.6.1" },
-    { name = "gepa", specifier = ">=0.1.4" },
+    { name = "gepa", specifier = ">=0.1.4,<0.2" },
     { name = "openai", specifier = ">=2.44.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "torch", specifier = "==2.11.0" },

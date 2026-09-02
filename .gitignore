@@ -6,6 +6,6 @@ __pycache__
 .env
 data/run_sft_1000.sh
 .testdeps
-eval/
+/eval/
 .pi
 experiments/

@@ -17,6 +17,7 @@ from prompt_optimization.eval.client import OpenRouterAgent
 from prompt_optimization.eval.evaluator import evaluate_episode
 from prompt_optimization.eval.protocol import HistoryTurn, build_messages
 from prompt_optimization.feedback import episode_reflection_record
+from prompt_optimization.runner import OpenRouterRolloutConfig
 
 
 class SequenceAgent:
@@ -180,6 +181,89 @@ def test_invalid_openrouter_response_becomes_episode_api_error() -> None:
     assert agent.last_response_metadata["error_type"] == (
         "InvalidOpenRouterResponseError"
     )
+
+
+def test_isolated_openrouter_retries_upstream_provider_error() -> None:
+    class ProviderError(RuntimeError):
+        status_code = 400
+        body = {"error": {"message": "Provider returned error"}}
+
+    class Completions:
+        calls = 0
+
+        def create(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("upstream rejected request")
+            message = SimpleNamespace(
+                tool_calls=[
+                    SimpleNamespace(
+                        function=SimpleNamespace(
+                            name="slide_tile", arguments='{"tile": 8}'
+                        )
+                    )
+                ],
+                content="",
+                reasoning="",
+                reasoning_details=None,
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message, finish_reason="tool_calls")],
+                usage=None,
+            )
+
+    completions = Completions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    agent = OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        system_prompt="test",
+        retry_delay=0,
+        client=client,
+    )
+
+    assert agent.next_action(example().board) == '{"tile": 8}'
+    assert completions.calls == 2
+
+
+def test_isolated_illegal_attempt_does_not_count_as_move() -> None:
+    isolated = evaluate_episode(example(), SequenceAgent(['{"tile": 1}']))
+    canonical = canonical_evaluate_episode(example(), SequenceAgent(['{"tile": 1}']))
+
+    assert isolated.outcome == canonical.outcome == "illegal"
+    assert isolated.moves_taken == canonical.moves_taken == 0
+
+
+def test_reflection_record_handles_already_solved_board() -> None:
+    solved_example = PuzzleExample(
+        example_id="solved",
+        board=(1, 2, 3, 4, 5, 6, 7, 8, 0),
+        optimal_actions=(),
+        optimal_length=0,
+        metadata={"bucket": "test", "action_interface": "tile_id_v1"},
+    )
+    episode = evaluate_episode(solved_example, SequenceAgent([]))
+
+    record = episode_reflection_record(episode)
+
+    assert record["Generated Outputs"]["reasoning_excerpts"] == []
+    assert record["Generated Outputs"]["final_distance"] == 0
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"request_timeout": 0}, "request_timeout"),
+        ({"max_turns": 46}, "max_turns"),
+        ({"top_p": 0}, "top_p"),
+        ({"keep_history": False, "keep_reasoning": True}, "keep_reasoning"),
+    ],
+)
+def test_rollout_config_rejects_invalid_settings(
+    overrides: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        OpenRouterRolloutConfig(model="test/model", **overrides)
 
 def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
