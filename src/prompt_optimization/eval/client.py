@@ -39,6 +39,8 @@ class OpenRouterAgent:
         request_timeout: float = 120.0,
         client: Any | None = None,
     ) -> None:
+        if request_timeout <= 0:
+            raise ValueError("request_timeout must be positive")
         if client is None:
             from openai import OpenAI
 

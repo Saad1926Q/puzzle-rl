@@ -1,7 +1,8 @@
 """GEPA adapter that evaluates strategy prompts through the existing environment."""
+from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any
 
 from tqdm import tqdm
@@ -59,6 +60,7 @@ class PuzzleGEPAAdapter:
         except KeyError as exc:
             raise ValueError(f"candidate must contain {STRATEGY_COMPONENT!r}") from exc
         prompt = self.system_prompt(strategy_prompt)
+
         def run_one(example: PuzzleExample) -> EpisodeResult:
             return evaluate_episode(
                 example,
@@ -68,24 +70,36 @@ class PuzzleGEPAAdapter:
                 keep_reasoning=self.keep_reasoning,
             )
 
+        if not batch:
+            return EvaluationBatch(
+                outputs=[],
+                scores=[],
+                trajectories=[] if capture_traces else None,
+                num_metric_calls=0,
+            )
+
+        episodes: list[EpisodeResult | None] = [None] * len(batch)
         workers = min(self.parallelism, len(batch))
-        episodes: list[EpisodeResult] = [None] * len(batch)  # type: ignore[list-item]
         with (
             ThreadPoolExecutor(max_workers=workers) as executor,
             tqdm(total=len(batch), desc="Puzzle rollouts", unit="episode", leave=False) as progress,
         ):
-            futures = [
-                (index, executor.submit(run_one, example))
+            future_indices: dict[Future[EpisodeResult], int] = {
+                executor.submit(run_one, example): index
                 for index, example in enumerate(batch)
-            ]
-            for index, future in futures:
-                episodes[index] = future.result()
+            }
+            for future in as_completed(future_indices):
+                episodes[future_indices[future]] = future.result()
                 progress.update(1)
+
+        completed = [episode for episode in episodes if episode is not None]
+        if len(completed) != len(batch):
+            raise RuntimeError("not all puzzle rollouts produced a result")
         return EvaluationBatch(
-            outputs=episodes,
-            scores=[episode.reward for episode in episodes],
-            trajectories=episodes if capture_traces else None,
-            num_metric_calls=len(episodes),
+            outputs=completed,
+            scores=[episode.reward for episode in completed],
+            trajectories=completed if capture_traces else None,
+            num_metric_calls=len(completed),
         )
 
     def make_reflective_dataset(

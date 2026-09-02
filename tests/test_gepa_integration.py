@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from types import SimpleNamespace
 
 import gepa
+import pytest
+
 
 from evaluation.constants import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_HISTORY
 from evaluation.dataset import PuzzleExample
 from evaluation.evaluator import evaluate_episode as canonical_evaluate_episode
 from prompt_optimization.adapter import PuzzleGEPAAdapter, STRATEGY_COMPONENT
 from prompt_optimization.eval.evaluator import evaluate_episode
+from prompt_optimization.eval.client import OpenRouterAgent
 from prompt_optimization.eval.protocol import HistoryTurn, build_messages
 from prompt_optimization.feedback import episode_reflection_record
 
@@ -64,6 +70,67 @@ def test_adapter_injects_only_candidate_strategy_and_uses_native_reward() -> Non
         "turn is illegal and will be rejected.\nUse a short verified plan."
     ]
 
+
+def test_adapter_parallelizes_rollouts_and_preserves_input_order(monkeypatch) -> None:
+    lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def fake_evaluate(item, *_args, **_kwargs):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.03 if item.example_id == "first" else 0.01)
+        with lock:
+            active -= 1
+        return SimpleNamespace(reward=float(item.optimal_length), example=item)
+
+    monkeypatch.setattr("prompt_optimization.adapter.evaluate_episode", fake_evaluate)
+    first = example()
+    first = PuzzleExample(
+        example_id="first",
+        board=first.board,
+        optimal_actions=first.optimal_actions,
+        optimal_length=1,
+        metadata=first.metadata,
+    )
+    second = PuzzleExample(
+        example_id="second",
+        board=first.board,
+        optimal_actions=first.optimal_actions,
+        optimal_length=2,
+        metadata=first.metadata,
+    )
+    adapter = PuzzleGEPAAdapter(
+        agent_factory=lambda _prompt: SequenceAgent([]),
+        max_turns=45,
+        keep_history=False,
+        keep_reasoning=False,
+        parallelism=2,
+    )
+
+    batch = adapter.evaluate(
+        [first, second],
+        {STRATEGY_COMPONENT: "Use a plan."},
+        capture_traces=True,
+    )
+
+    assert maximum_active == 2
+    assert [output.example.example_id for output in batch.outputs] == ["first", "second"]
+    assert batch.scores == [1.0, 2.0]
+
+
+
+def test_isolated_openrouter_client_rejects_nonpositive_timeout() -> None:
+    with pytest.raises(ValueError, match="request_timeout must be positive"):
+        OpenRouterAgent(
+            api_key="not-used",
+            model="test/model",
+            system_prompt="test",
+            request_timeout=0,
+            client=object(),
+        )
 
 def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
