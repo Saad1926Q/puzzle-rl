@@ -34,9 +34,9 @@ class OpenRouterAgent:
         allow_fallbacks: bool = False,
         data_collection: str = "deny",
         distillable_only: bool = False,
-        quantizations: Sequence[str] = (),
         provider_retries: int = 2,
         retry_delay: float = 1.0,
+        request_timeout: float = 120.0,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -45,6 +45,7 @@ class OpenRouterAgent:
             client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
+                timeout=request_timeout,
                 default_headers={
                     "X-OpenRouter-Metadata": "enabled",
                     "X-OpenRouter-Title": "puzzle-rl-gepa",

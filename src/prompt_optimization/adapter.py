@@ -1,9 +1,10 @@
 """GEPA adapter that evaluates strategy prompts through the existing environment."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from tqdm import tqdm
 
 from gepa.core.adapter import EvaluationBatch
 
@@ -29,11 +30,15 @@ class PuzzleGEPAAdapter:
         max_turns: int,
         keep_history: bool,
         keep_reasoning: bool,
+        parallelism: int = 8,
     ) -> None:
+        if parallelism <= 0:
+            raise ValueError("parallelism must be positive")
         self.agent_factory = agent_factory
         self.max_turns = max_turns
         self.keep_history = keep_history
         self.keep_reasoning = keep_reasoning
+        self.parallelism = parallelism
 
     @staticmethod
     def system_prompt(strategy_prompt: str) -> str:
@@ -54,16 +59,28 @@ class PuzzleGEPAAdapter:
         except KeyError as exc:
             raise ValueError(f"candidate must contain {STRATEGY_COMPONENT!r}") from exc
         prompt = self.system_prompt(strategy_prompt)
-        episodes = [
-            evaluate_episode(
+        def run_one(example: PuzzleExample) -> EpisodeResult:
+            return evaluate_episode(
                 example,
                 self.agent_factory(prompt),
                 max_turns=self.max_turns,
                 keep_history=self.keep_history,
                 keep_reasoning=self.keep_reasoning,
             )
-            for example in batch
-        ]
+
+        workers = min(self.parallelism, len(batch))
+        episodes: list[EpisodeResult] = [None] * len(batch)  # type: ignore[list-item]
+        with (
+            ThreadPoolExecutor(max_workers=workers) as executor,
+            tqdm(total=len(batch), desc="Puzzle rollouts", unit="episode", leave=False) as progress,
+        ):
+            futures = [
+                (index, executor.submit(run_one, example))
+                for index, example in enumerate(batch)
+            ]
+            for index, future in futures:
+                episodes[index] = future.result()
+                progress.update(1)
         return EvaluationBatch(
             outputs=episodes,
             scores=[episode.reward for episode in episodes],

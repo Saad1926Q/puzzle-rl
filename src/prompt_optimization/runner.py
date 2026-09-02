@@ -42,6 +42,8 @@ class OpenRouterRolloutConfig:
     max_turns: int = MAX_TURNS
     keep_history: bool = True
     keep_reasoning: bool = True
+    parallelism: int = 8
+    request_timeout: float = 120.0
 
 
 def run_gepa_optimization(
@@ -79,6 +81,7 @@ def run_gepa_optimization(
             data_collection=rollout.data_collection,
             distillable_only=rollout.distillable_only,
             quantizations=rollout.quantizations,
+            request_timeout=rollout.request_timeout,
             system_prompt=system_prompt,
         )
 
@@ -87,7 +90,9 @@ def run_gepa_optimization(
         max_turns=rollout.max_turns,
         keep_history=rollout.keep_history,
         keep_reasoning=rollout.keep_reasoning,
+        parallelism=rollout.parallelism,
     )
+
     config = {
         "rollout": asdict(rollout),
         "reflection_model": reflection_model,

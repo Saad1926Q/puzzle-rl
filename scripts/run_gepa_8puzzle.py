@@ -55,7 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--keep-history", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--keep-reasoning", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--max-metric-calls", type=_positive_int, default=120)
+    parser.add_argument("--parallelism", type=_positive_int, default=8)
+    parser.add_argument("--request-timeout", type=float, default=120.0)
     parser.add_argument("--reflection-minibatch-size", type=_positive_int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
@@ -84,6 +85,8 @@ def main() -> None:
         max_turns=args.max_turns,
         keep_history=args.keep_history,
         keep_reasoning=args.keep_reasoning,
+        parallelism=args.parallelism,
+        request_timeout=args.request_timeout,
     )
     result = run_gepa_optimization(
         splits=splits,
