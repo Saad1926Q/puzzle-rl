@@ -27,16 +27,16 @@ DEFAULT_EXCLUDE_CONFIGS = ("eval", "exhaustive")
 # Each tuple is (bucket label, minimum depth, maximum depth, number of examples).
 SPLIT_BANDS = {
     "train": (
-        ("bucket_1", 9, 11, 20),
-        ("bucket_2", 12, 16, 15),
-        ("bucket_3", 17, 22, 10),
-        ("bucket_4", 23, 30, 5),
+        ("bucket_1", 9, 11, 12),
+        ("bucket_2", 12, 16, 9),
+        ("bucket_3", 17, 22, 6),
+        ("bucket_4", 23, 30, 3),
     ),
     "validation": (
-        ("bucket_1", 9, 11, 20),
-        ("bucket_2", 12, 16, 15),
-        ("bucket_3", 17, 22, 10),
-        ("bucket_4", 23, 30, 5),
+        ("bucket_1", 9, 11, 8),
+        ("bucket_2", 12, 16, 6),
+        ("bucket_3", 17, 22, 4),
+        ("bucket_4", 23, 30, 2),
     ),
     "test": (
         ("bucket_1", 9, 11, 12),
@@ -45,7 +45,7 @@ SPLIT_BANDS = {
         ("bucket_4", 23, 30, 6),
     ),
 }
-EXPECTED_SPLIT_SIZES = {"train": 50, "validation": 50, "test": 40}
+EXPECTED_SPLIT_SIZES = {"train": 30, "validation": 20, "test": 40}
 
 
 def load_excluded_boards(

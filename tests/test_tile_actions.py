@@ -111,8 +111,8 @@ def test_gepa_splits_are_disjoint_balanced_and_exclude_evaluations() -> None:
     splits = generator["generate_gepa_splits"](random.Random(42), excluded)
 
     assert {split: len(records) for split, records in splits.items()} == {
-        "train": 50,
-        "validation": 50,
+        "train": 30,
+        "validation": 20,
         "test": 40,
     }
     boards_by_split = {
@@ -125,12 +125,12 @@ def test_gepa_splits_are_disjoint_balanced_and_exclude_evaluations() -> None:
     )
 
     expected_buckets = {
-        "train": {"bucket_1": 20, "bucket_2": 15, "bucket_3": 10, "bucket_4": 5},
+        "train": {"bucket_1": 12, "bucket_2": 9, "bucket_3": 6, "bucket_4": 3},
         "validation": {
-            "bucket_1": 20,
-            "bucket_2": 15,
-            "bucket_3": 10,
-            "bucket_4": 5,
+            "bucket_1": 8,
+            "bucket_2": 6,
+            "bucket_3": 4,
+            "bucket_4": 2,
         },
         "test": {"bucket_1": 12, "bucket_2": 12, "bucket_3": 10, "bucket_4": 6},
     }
