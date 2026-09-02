@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-reasoning", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--parallelism", type=_positive_int, default=8)
     parser.add_argument("--request-timeout", type=float, default=120.0)
+    parser.add_argument("--max-metric-calls", type=_positive_int, default=120)
     parser.add_argument("--reflection-minibatch-size", type=_positive_int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
