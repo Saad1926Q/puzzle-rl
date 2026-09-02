@@ -111,8 +111,8 @@ def test_gepa_splits_are_disjoint_balanced_and_exclude_evaluations() -> None:
     splits = generator["generate_gepa_splits"](random.Random(42), excluded)
 
     assert {split: len(records) for split, records in splits.items()} == {
-        "train": 30,
-        "validation": 12,
+        "train": 50,
+        "validation": 50,
         "test": 40,
     }
     boards_by_split = {
@@ -124,12 +124,20 @@ def test_gepa_splits_are_disjoint_balanced_and_exclude_evaluations() -> None:
         set.union(*boards_by_split.values())
     )
 
-    for records in splits.values():
-        assert all(7 <= record["optimal_length"] <= 30 for record in records)
+    expected_buckets = {
+        "train": {"bucket_1": 20, "bucket_2": 15, "bucket_3": 10, "bucket_4": 5},
+        "validation": {
+            "bucket_1": 20,
+            "bucket_2": 15,
+            "bucket_3": 10,
+            "bucket_4": 5,
+        },
+        "test": {"bucket_1": 12, "bucket_2": 12, "bucket_3": 10, "bucket_4": 6},
+    }
+    for split, records in splits.items():
+        assert all(9 <= record["optimal_length"] <= 30 for record in records)
         assert all(record["action_interface"] == "tile_id_v1" for record in records)
-        assert {
-            record["bucket"] for record in records
-        } <= {"bucket_1", "bucket_2", "bucket_3", "bucket_4"}
+        assert Counter(record["bucket"] for record in records) == expected_buckets[split]
 
 
 def test_scramble_never_immediately_reverses_tile(
