@@ -122,6 +122,7 @@ def run_gepa_optimization(
         use_merge=False,
         track_best_outputs=False,
         cache_evaluation=False,
+        display_progress_bar=True,
     )
     best_candidate = result.best_candidate
     assert isinstance(best_candidate, dict)
