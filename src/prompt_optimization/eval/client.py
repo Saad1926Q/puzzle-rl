@@ -34,6 +34,7 @@ class OpenRouterAgent:
         allow_fallbacks: bool = False,
         data_collection: str = "deny",
         distillable_only: bool = False,
+        quantizations: Sequence[str] = (),
         provider_retries: int = 2,
         retry_delay: float = 1.0,
         request_timeout: float = 120.0,

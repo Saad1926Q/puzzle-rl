@@ -132,6 +132,24 @@ def test_isolated_openrouter_client_rejects_nonpositive_timeout() -> None:
             client=object(),
         )
 
+
+def test_isolated_openrouter_client_accepts_runner_provider_options() -> None:
+    agent = OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        system_prompt="test",
+        upstream_providers=("friendli",),
+        allow_fallbacks=False,
+        data_collection="deny",
+        distillable_only=False,
+        quantizations=("fp8",),
+        request_timeout=120,
+        client=object(),
+    )
+
+    assert agent.upstream_providers == ("friendli",)
+    assert agent.quantizations == ("fp8",)
+
 def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
     record = episode_reflection_record(episode)
