@@ -17,7 +17,7 @@ from prompt_optimization.eval.client import OpenRouterAgent
 from prompt_optimization.eval.evaluator import evaluate_episode
 from prompt_optimization.eval.protocol import HistoryTurn, build_messages
 from prompt_optimization.feedback import episode_reflection_record
-from prompt_optimization.runner import OpenRouterRolloutConfig
+from prompt_optimization.runner import OpenRouterRolloutConfig, ensure_reflection_runtime
 
 
 class SequenceAgent:
@@ -264,6 +264,20 @@ def test_rollout_config_rejects_invalid_settings(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         OpenRouterRolloutConfig(model="test/model", **overrides)
+
+
+def test_missing_litellm_fails_before_gepa_evaluation(monkeypatch) -> None:
+    def missing_litellm(_name: str) -> None:
+        error = ModuleNotFoundError("No module named 'litellm'")
+        error.name = "litellm"
+        raise error
+
+    monkeypatch.setattr(
+        "prompt_optimization.runner.importlib.import_module", missing_litellm
+    )
+
+    with pytest.raises(RuntimeError, match="uv sync"):
+        ensure_reflection_runtime()
 
 def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))

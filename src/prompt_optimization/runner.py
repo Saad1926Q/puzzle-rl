@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from dataclasses import asdict, dataclass
 from math import isfinite
@@ -77,6 +78,20 @@ class OpenRouterRolloutConfig:
             raise ValueError("keep_reasoning requires keep_history")
 
 
+def ensure_reflection_runtime() -> None:
+    """Fail before rollout evaluation if GEPA's string-model client is unavailable."""
+
+    try:
+        importlib.import_module("litellm")
+    except ModuleNotFoundError as exc:
+        if exc.name != "litellm":
+            raise
+        raise RuntimeError(
+            "GEPA reflection models require LiteLLM; install project dependencies "
+            "with `uv sync`"
+        ) from exc
+
+
 def run_gepa_optimization(
     *,
     splits: GEPASplits,
@@ -93,6 +108,7 @@ def run_gepa_optimization(
         raise ValueError("GEPA budgets must be positive")
     if rollout.keep_reasoning and not rollout.keep_history:
         raise ValueError("keep_reasoning requires keep_history")
+    ensure_reflection_runtime()
 
     api_key = get_api_key(rollout.api_key_env)
     output_dir.mkdir(parents=True, exist_ok=True)

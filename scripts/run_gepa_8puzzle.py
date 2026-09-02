@@ -9,7 +9,11 @@ from pathlib import Path
 
 from evaluation.constants import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS
 from prompt_optimization.dataset import DEFAULT_GEPA_CONFIG, load_gepa_splits
-from prompt_optimization.runner import OpenRouterRolloutConfig, run_gepa_optimization
+from prompt_optimization.runner import (
+    OpenRouterRolloutConfig,
+    ensure_reflection_runtime,
+    run_gepa_optimization,
+)
 
 
 def _positive_int(value: str) -> int:
@@ -75,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    ensure_reflection_runtime()
     splits = load_gepa_splits(dataset=args.dataset, config=args.config)
     rollout = OpenRouterRolloutConfig(
         model=args.task_model,
