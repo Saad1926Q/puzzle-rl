@@ -43,8 +43,6 @@ def _reasoning_excerpts(episode: EpisodeResult, distances: list[int]) -> list[di
         excerpts.append(
             {
                 "turn": step.turn,
-                "distance_before": distances[index],
-                "distance_after": distances[index + 1],
                 "tile": step.tile,
                 "completion_tokens": _completion_tokens(step.response_metadata),
                 "text": reasoning[:_MAX_REASONING_CHARS],
@@ -81,42 +79,47 @@ def episode_reflection_record(episode: EpisodeResult) -> dict[str, Any]:
         {
             "turn": step.turn,
             "tile": step.tile,
-            "legal_tiles": list(step.legal_tiles),
-            "distance_before": distances[index],
-            "distance_after": distances[index + 1],
-            "progress_reward": step.progress_reward,
             "status": step.status,
         }
-        for index, step in enumerate(episode.steps)
+        for step in episode.steps
     ]
     best_distance = min(distances)
     best_turn = distances.index(best_distance)
+    per_turn_diagnostics = "; ".join(
+        f"turn {step.turn}: exact distance {distances[index]} -> "
+        f"{distances[index + 1]}, progress reward {step.progress_reward:.6f}"
+        for index, step in enumerate(episode.steps)
+    )
     diagnostic = (
-        f"Outcome: {episode.outcome}. Reward: {episode.reward:.6f}. "
-        f"Moves: {episode.moves_taken}; optimal depth: {episode.example.optimal_length}. "
-        f"Best exact distance: {best_distance} at turn {best_turn}; "
+        "VISIBILITY BOUNDARY: The evaluator-only diagnostics below were calculated "
+        "after the rollout. The task model did not receive and cannot access optimal "
+        "depth, exact distance, progress reward, legal-tile lists, or solver output. "
+        "Use these values only to diagnose general behavior. The revised strategy must "
+        "rely only on observable boards, retained board/action history, and tool results; "
+        "do not mention or depend on evaluator-only values. "
+        f"Evaluator-only summary: Outcome: {episode.outcome}. "
+        f"Reward: {episode.reward:.6f}. Moves: {episode.moves_taken}; "
+        f"initial exact distance: {distances[0]}; "
+        f"best exact distance: {best_distance} at turn {best_turn}; "
         f"final exact distance: {distances[-1]}. "
         f"Distance-reducing actions: {sum(reward > 0 for reward in progress)}; "
         f"distance-increasing actions: {sum(reward < 0 for reward in progress)}; "
         f"immediate reversals: {immediate_reversals}; repeated boards: {repeated_boards}; "
-        f"longest non-progress run: {longest_nonprogress}."
+        f"longest non-progress run: {longest_nonprogress}. "
+        f"Evaluator-only per-turn analysis: {per_turn_diagnostics or 'no actions'}."
     )
     if episode.outcome == "api_error":
         diagnostic += " This is infrastructure failure, not strategy feedback."
 
     return {
         "Inputs": {
-            "example_id": episode.example.example_id,
             "initial_board": list(episode.example.board),
-            "optimal_depth": episode.example.optimal_length,
-            "bucket": episode.example.metadata.get("bucket"),
         },
         "Generated Outputs": {
             "outcome": episode.outcome,
             "reward": episode.reward,
             "moves_taken": episode.moves_taken,
             "final_board": list(episode.final_board),
-            "final_distance": distances[-1],
             "action_trace": action_trace,
             "completion_tokens": sum(completion_tokens),
             "reasoning_excerpts": _reasoning_excerpts(episode, distances),

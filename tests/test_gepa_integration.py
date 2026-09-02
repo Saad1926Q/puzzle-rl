@@ -247,7 +247,7 @@ def test_reflection_record_handles_already_solved_board() -> None:
     record = episode_reflection_record(episode)
 
     assert record["Generated Outputs"]["reasoning_excerpts"] == []
-    assert record["Generated Outputs"]["final_distance"] == 0
+    assert "final exact distance: 0" in record["Feedback"]
 
 
 @pytest.mark.parametrize(
@@ -279,16 +279,28 @@ def test_missing_litellm_fails_before_gepa_evaluation(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="uv sync"):
         ensure_reflection_runtime()
 
-def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
+def test_reflection_record_separates_observations_from_evaluator_diagnostics() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))
     record = episode_reflection_record(episode)
     serialized = json.dumps(record)
 
     assert "optimal_actions" not in serialized
-    assert record["Inputs"]["optimal_depth"] == 1
+    assert set(record["Inputs"]) == {"initial_board"}
     assert record["Generated Outputs"]["outcome"] == "solved"
-    assert record["Generated Outputs"]["action_trace"][0]["distance_before"] == 1
+    assert record["Generated Outputs"]["action_trace"] == [
+        {"turn": 1, "tile": 8, "status": "solved"}
+    ]
+    assert set(record["Generated Outputs"]["reasoning_excerpts"][0]) == {
+        "turn",
+        "tile",
+        "completion_tokens",
+        "text",
+    }
+    assert "VISIBILITY BOUNDARY" in record["Feedback"]
+    assert "cannot access optimal depth, exact distance" in record["Feedback"]
+    assert "do not mention or depend on evaluator-only values" in record["Feedback"]
     assert "Outcome: solved" in record["Feedback"]
+    assert "exact distance 1 -> 0" in record["Feedback"]
 
 
 def test_gepa_smoke_mutates_external_strategy_with_fake_agents(tmp_path) -> None:
