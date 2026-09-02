@@ -13,8 +13,8 @@ from evaluation.constants import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_HISTORY
 from evaluation.dataset import PuzzleExample
 from evaluation.evaluator import evaluate_episode as canonical_evaluate_episode
 from prompt_optimization.adapter import PuzzleGEPAAdapter, STRATEGY_COMPONENT
-from prompt_optimization.eval.evaluator import evaluate_episode
 from prompt_optimization.eval.client import OpenRouterAgent
+from prompt_optimization.eval.evaluator import evaluate_episode
 from prompt_optimization.eval.protocol import HistoryTurn, build_messages
 from prompt_optimization.feedback import episode_reflection_record
 
@@ -149,6 +149,37 @@ def test_isolated_openrouter_client_accepts_runner_provider_options() -> None:
 
     assert agent.upstream_providers == ("friendli",)
     assert agent.quantizations == ("fp8",)
+
+
+def test_invalid_openrouter_response_becomes_episode_api_error() -> None:
+    class EmptyCompletions:
+        calls = 0
+
+        def create(self, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(choices=[])
+
+    completions = EmptyCompletions()
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=completions)
+    )
+    agent = OpenRouterAgent(
+        api_key="not-used",
+        model="test/model",
+        system_prompt="test",
+        provider_retries=2,
+        retry_delay=0,
+        client=client,
+    )
+
+    episode = evaluate_episode(example(), agent)
+
+    assert completions.calls == 3
+    assert episode.outcome == "api_error"
+    assert episode.reward == 0
+    assert agent.last_response_metadata["error_type"] == (
+        "InvalidOpenRouterResponseError"
+    )
 
 def test_reflection_record_excludes_optimal_actions_and_summarizes_episode() -> None:
     episode = evaluate_episode(example(), SequenceAgent(['{"tile": 8}']))

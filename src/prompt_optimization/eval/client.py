@@ -15,6 +15,10 @@ from prompt_optimization.eval.protocol import HistoryTurn, build_messages, json_
 from puzzle3.board import Board
 
 
+class InvalidOpenRouterResponseError(RuntimeError):
+    """OpenRouter returned HTTP success without a usable completion."""
+
+
 class OpenRouterAgent:
     """Candidate-prompt OpenRouter client for isolated GEPA rollouts."""
 
@@ -44,11 +48,11 @@ class OpenRouterAgent:
             raise ValueError("request_timeout must be positive")
         if client is None:
             from openai import OpenAI
-
             client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
                 timeout=request_timeout,
+                max_retries=0,
                 default_headers={
                     "X-OpenRouter-Metadata": "enabled",
                     "X-OpenRouter-Title": "puzzle-rl-gepa",
@@ -117,14 +121,19 @@ class OpenRouterAgent:
         for attempt in range(self.provider_retries + 1):
             try:
                 response = self.client.chat.completions.create(**request)
+                result, metadata = _parse_response(response)
                 break
             except Exception as exc:
-                if attempt < self.provider_retries and _retryable(exc):
+                invalid_response = isinstance(
+                    exc, InvalidOpenRouterResponseError
+                )
+                if attempt < self.provider_retries and (
+                    _retryable(exc) or invalid_response
+                ):
                     sleep(self.retry_delay * (attempt + 1))
                     continue
                 self.last_response_metadata = _api_error_metadata(exc)
                 raise
-        result, metadata = _parse_response(response)
         metadata.update({
             "response_id": _field(response, "id"),
             "resolved_model": _field(response, "model"),
@@ -134,12 +143,15 @@ class OpenRouterAgent:
         return result
 
 
+
 def _parse_response(response: Any) -> tuple[str, dict[str, Any]]:
     try:
         choice = response.choices[0]
         message = choice.message
     except (AttributeError, IndexError, TypeError) as exc:
-        raise RuntimeError("OpenRouter response did not contain a completion choice") from exc
+        raise InvalidOpenRouterResponseError(
+            "OpenRouter response did not contain a completion choice"
+        ) from exc
     calls = getattr(message, "tool_calls", None) or []
     tile = None
     if len(calls) == 1:
