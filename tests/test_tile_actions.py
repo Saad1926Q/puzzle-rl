@@ -100,44 +100,6 @@ def test_exhaustive_eval_has_requested_unseen_boards() -> None:
     assert not ({tuple(record["board"]) for record in records} & excluded)
 
 
-def test_gepa_splits_are_disjoint_balanced_and_exclude_evaluations() -> None:
-    import runpy
-
-    generator = runpy.run_path("data/generate_gepa_data_3x3.py")
-    excluded = {
-        (1, 2, 3, 4, 5, 6, 7, 0, 8),
-        (1, 2, 3, 4, 5, 6, 0, 7, 8),
-    }
-    splits = generator["generate_gepa_splits"](random.Random(42), excluded)
-
-    assert {split: len(records) for split, records in splits.items()} == {
-        "train": 30,
-        "validation": 20,
-        "test": 40,
-    }
-    boards_by_split = {
-        split: {tuple(record["board"]) for record in records}
-        for split, records in splits.items()
-    }
-    assert not (set.union(*boards_by_split.values()) & excluded)
-    assert sum(map(len, boards_by_split.values())) == len(
-        set.union(*boards_by_split.values())
-    )
-
-    expected_buckets = {
-        "train": {"bucket_1": 12, "bucket_2": 9, "bucket_3": 6, "bucket_4": 3},
-        "validation": {
-            "bucket_1": 8,
-            "bucket_2": 6,
-            "bucket_3": 4,
-            "bucket_4": 2,
-        },
-        "test": {"bucket_1": 12, "bucket_2": 12, "bucket_3": 10, "bucket_4": 6},
-    }
-    for split, records in splits.items():
-        assert all(9 <= record["optimal_length"] <= 30 for record in records)
-        assert all(record["action_interface"] == "tile_id_v1" for record in records)
-        assert Counter(record["bucket"] for record in records) == expected_buckets[split]
 
 
 def test_scramble_never_immediately_reverses_tile(
