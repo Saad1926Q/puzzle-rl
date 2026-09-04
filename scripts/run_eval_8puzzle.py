@@ -208,6 +208,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow OpenRouter to retry a different provider after a failed request",
     )
     parser.add_argument(
+        "--openrouter-relax-parameters",
+        action="store_true",
+        help=(
+            "Permit an upstream that does not support every requested parameter; "
+            "OpenRouter may ignore unsupported parameters"
+        ),
+    )
+    parser.add_argument(
         "--openrouter-quantization",
         action="append",
         default=[],
@@ -307,7 +315,7 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
             {
                 "openrouter_upstreams": args.openrouter_upstream,
                 "openrouter_allow_fallbacks": args.openrouter_allow_fallbacks,
-                "openrouter_require_parameters": True,
+                "openrouter_require_parameters": not args.openrouter_relax_parameters,
                 "openrouter_quantizations": args.openrouter_quantization,
                 "openrouter_data_collection": args.openrouter_data_collection,
                 "openrouter_distillable_only": args.openrouter_distillable_only,
@@ -367,7 +375,7 @@ def main() -> None:
                         "top_p": args.top_p,
                         "upstream_providers": args.openrouter_upstream,
                         "allow_fallbacks": args.openrouter_allow_fallbacks,
-                        "require_parameters": True,
+                        "require_parameters": not args.openrouter_relax_parameters,
                         "data_collection": args.openrouter_data_collection,
                         "distillable_only": args.openrouter_distillable_only,
                         "quantizations": args.openrouter_quantization,

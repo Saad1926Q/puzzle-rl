@@ -397,6 +397,7 @@ def test_openrouter_sends_reproducible_routing_and_records_metadata() -> None:
         upstream_providers=("together",),
         quantizations=("bf16",),
         distillable_only=True,
+        require_parameters=False,
     )
 
     assert parse_tile(agent.next_action((1, 2, 3, 4, 5, 6, 7, 0, 8))) == 8
@@ -405,7 +406,7 @@ def test_openrouter_sends_reproducible_routing_and_records_metadata() -> None:
         "reasoning": {"effort": "none", "exclude": False},
         "provider": {
             "allow_fallbacks": False,
-            "require_parameters": True,
+            "require_parameters": False,
             "data_collection": "deny",
             "only": ["together"],
             "quantizations": ["bf16"],
@@ -659,6 +660,17 @@ def test_openrouter_cli_requires_model_and_uses_reproducible_defaults() -> None:
     assert args.openrouter_data_collection == "deny"
     assert args.openrouter_upstream == ["together"]
     assert args.openrouter_quantization == ["bf16"]
+    assert args.openrouter_relax_parameters is False
+    relaxed_args = parser.parse_args(
+        [
+            "--provider",
+            "openrouter",
+            "--model",
+            "qwen/qwen3.5-27b",
+            "--openrouter-relax-parameters",
+        ]
+    )
+    assert relaxed_args.openrouter_relax_parameters is True
     assert args.reasoning_effort is None
 
     missing_model = parser.parse_args(["--provider", "openrouter"])
