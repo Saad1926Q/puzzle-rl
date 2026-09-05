@@ -8,7 +8,7 @@ from pathlib import Path
 from evaluation.constants import DEFAULT_OPENROUTER_BASE_URL
 from evaluation.protocol import DEFAULT_API_KEY_ENV, get_api_key
 from sft_generation.annotation import AnnotationConfig, annotation_futures
-from sft_generation.constants import DEFAULT_TEACHER_MODEL
+from sft_generation.constants import DEFAULT_ANNOTATION_MAX_TOKENS, DEFAULT_TEACHER_MODEL
 from sft_generation.formatting import build_sft_record
 from sft_generation.storage import append_jsonl, read_jsonl, write_json, write_jsonl
 
@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=DEFAULT_OPENROUTER_BASE_URL)
     parser.add_argument("--api-key-env", default=DEFAULT_API_KEY_ENV)
     parser.add_argument("--parallelism", type=int, default=8)
-    parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--max-tokens", type=int, default=DEFAULT_ANNOTATION_MAX_TOKENS)
     parser.add_argument("--reasoning-effort")
     parser.add_argument("--temperature", type=float, default=0.3)
     parser.add_argument("--top-p", type=float, default=1.0)

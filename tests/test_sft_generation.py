@@ -154,9 +154,15 @@ def test_annotation_is_validated_without_changing_action() -> None:
     assert result["valid"] is True
     assert result["tile"] == 7
     assert clean_rationale("<think>  A useful move. </think>") == "A useful move."
-    bad = {**result, "rationale": "The solver found the optimal exact distance."}
+    bad = {
+        **result,
+        "rationale": "The solver selected this move because it is optimal for solving.",
+    }
     with pytest.raises(ValueError, match="forbidden"):
         validate_annotation(bad, trajectory(), 0)
+    long = {**result, "rationale": " ".join(["Move"] * 31)}
+    with pytest.raises(ValueError, match="10 to 30 words"):
+        validate_annotation(long, trajectory(), 0)
 
 
 def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
@@ -176,7 +182,7 @@ def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
             "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
             "tile": 8,
             "next_board": list(GOAL),
-            "rationale": "Sliding tile 8 completes the final lower-right placement.",
+            "rationale": "Sliding tile 8 completes the final lower-right placement and solves the puzzle.",
             "valid": True,
         },
     ]

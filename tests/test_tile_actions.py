@@ -105,12 +105,12 @@ def test_sft_source_is_balanced_fresh_and_has_no_oracle_actions() -> None:
 
     generator = runpy.run_path("data/create_sft_source_3x3.py")
     paths = generator["enumerate_from_goal"]()
-    excluded = {next(board for board, path in paths.items() if len(path) == 12)}
+    excluded = {next(board for board, path in paths.items() if len(path) == 10)}
     records = generator["generate_sft_source"](random.Random(42), excluded)
 
-    assert len(records) == 1_000
+    assert len(records) == 200
     assert Counter(record["optimal_length"] for record in records) == {
-        depth: 200 for depth in range(12, 17)
+        depth: 20 for depth in range(10, 20)
     }
     assert len({tuple(record["board"]) for record in records}) == len(records)
     assert not ({tuple(record["board"]) for record in records} & excluded)

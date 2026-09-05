@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from puzzle3.render import render
 from sft_generation.client import OpenRouterTextClient, TextCompletion
-from sft_generation.constants import ANNOTATION_PROMPT
+from sft_generation.constants import ANNOTATION_PROMPT, DEFAULT_ANNOTATION_MAX_TOKENS
 from sft_generation.rollout import validate_trajectory
 
 
@@ -19,7 +19,7 @@ class AnnotationConfig:
 
     model: str
     base_url: str
-    max_tokens: int = 512
+    max_tokens: int = DEFAULT_ANNOTATION_MAX_TOKENS
     thinking: bool = True
     reasoning_effort: str | None = None
     temperature: float = 0.3
@@ -99,9 +99,8 @@ def validate_annotation(
     rationale = annotation.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
         raise ValueError("annotation rationale is empty")
-    words = rationale.split()
-    if not 5 <= len(words) <= 60:
-        raise ValueError("annotation rationale must contain 5 to 60 words")
+    if not 10 <= len(rationale.split()) <= 30:
+        raise ValueError("annotation rationale must contain 10 to 30 words")
     forbidden = ("optimal", "solver", "reward", "exact distance")
     lowered = rationale.lower()
     if any(term in lowered for term in forbidden):
