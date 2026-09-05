@@ -10,7 +10,7 @@ from evaluation.protocol import DEFAULT_API_KEY_ENV, get_api_key
 from sft_generation.annotation import AnnotationConfig, annotation_futures
 from sft_generation.constants import DEFAULT_TEACHER_MODEL
 from sft_generation.formatting import build_sft_record
-from sft_generation.storage import read_jsonl, write_json, write_jsonl
+from sft_generation.storage import append_jsonl, read_jsonl, write_json, write_jsonl
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,6 +80,7 @@ def main() -> None:
                 config=config,
                 parallelism=args.parallelism,
                 skip_keys=set(stored),
+                on_result=lambda record: append_jsonl(annotations_path, record),
             )
         )
     ordered_annotations = [stored[key] for key in sorted(stored)]

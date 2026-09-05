@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from puzzle3.render import render
 from sft_generation.client import OpenRouterTextClient, TextCompletion
@@ -138,6 +138,7 @@ def annotation_futures(
     config: AnnotationConfig,
     parallelism: int,
     skip_keys: set[tuple[str, int]] | None = None,
+    on_result: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[tuple[str, int], dict[str, Any]]:
     """Annotate every missing move and retain invalid results for inspection."""
 
@@ -174,9 +175,9 @@ def annotation_futures(
             step = trajectory["steps"][step_index]
             key = (trajectory["source_id"], step["turn"])
             try:
-                results[key] = future.result()
+                annotation = future.result()
             except Exception as exc:
-                results[key] = {
+                annotation = {
                     "source_id": trajectory["source_id"],
                     "turn": step["turn"],
                     "board": step["board"],
@@ -186,4 +187,7 @@ def annotation_futures(
                     "valid": False,
                     "error": str(exc),
                 }
+            results[key] = annotation
+            if on_result is not None:
+                on_result(annotation)
     return results
