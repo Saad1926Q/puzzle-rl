@@ -16,7 +16,7 @@ from sft_generation.rollout import (
     select_successful_rollout,
     trajectory_record,
 )
-from sft_generation.storage import append_jsonl, read_jsonl, write_json
+from sft_generation.storage import append_jsonl, read_jsonl, write_json, write_jsonl
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-examples", type=int)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--model", default=DEFAULT_TEACHER_MODEL)
+    parser.add_argument(
+        "--retry-skipped",
+        action="store_true",
+        help="retry source boards previously recorded as skipped",
+    )
     parser.add_argument("--base-url", default="https://openrouter.ai/api/v1")
     parser.add_argument("--api-key-env", default=DEFAULT_API_KEY_ENV)
     parser.add_argument("--num-rollouts", type=int, default=2)
@@ -71,7 +76,12 @@ def main() -> None:
         limit=args.num_examples,
         offset=args.offset,
     )
-    pending = [example for example in examples if example.example_id not in solved | skipped]
+    pending = [
+        example
+        for example in examples
+        if example.example_id not in solved
+        and (args.retry_skipped or example.example_id not in skipped)
+    ]
     from evaluation.protocol import get_api_key
 
     config = RolloutConfig(
@@ -126,6 +136,14 @@ def main() -> None:
             },
         )
         skipped_count += 1
+    if args.retry_skipped:
+        current_solved = existing_ids(solved_path)
+        remaining_skipped: dict[str, dict] = {}
+        for record in read_jsonl(skipped_path):
+            source_id = str(record.get("source_id", ""))
+            if source_id and source_id not in current_solved:
+                remaining_skipped[source_id] = record
+        write_jsonl(skipped_path, remaining_skipped.values())
     write_json(
         args.output_dir / "generation_metadata.json",
         {
@@ -137,7 +155,7 @@ def main() -> None:
             "model": args.model,
             "num_rollouts": args.num_rollouts,
             "parallelism": args.parallelism,
-            "max_turns": args.max_turns,
+            "retry_skipped": args.retry_skipped,
             "max_tokens": args.max_tokens,
             "thinking": not args.no_thinking,
             "reasoning_effort": args.reasoning_effort,
