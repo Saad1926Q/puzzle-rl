@@ -100,6 +100,24 @@ def test_exhaustive_eval_has_requested_unseen_boards() -> None:
     assert not ({tuple(record["board"]) for record in records} & excluded)
 
 
+def test_sft_source_is_balanced_fresh_and_has_no_oracle_actions() -> None:
+    import runpy
+
+    generator = runpy.run_path("data/create_sft_source_3x3.py")
+    paths = generator["enumerate_from_goal"]()
+    excluded = {next(board for board, path in paths.items() if len(path) == 12)}
+    records = generator["generate_sft_source"](random.Random(42), excluded)
+
+    assert len(records) == 1_500
+    assert Counter(record["optimal_length"] for record in records) == {
+        depth: 300 for depth in range(12, 17)
+    }
+    assert len({tuple(record["board"]) for record in records}) == len(records)
+    assert not ({tuple(record["board"]) for record in records} & excluded)
+    assert all(record["action_interface"] == "tile_id_v1" for record in records)
+    assert all("optimal_actions" not in record for record in records)
+
+
 
 
 def test_scramble_never_immediately_reverses_tile(

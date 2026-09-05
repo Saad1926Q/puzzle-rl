@@ -465,6 +465,25 @@ def test_openrouter_uses_provider_default_effort_when_unspecified() -> None:
         "exclude": False,
     }
 
+def test_openrouter_empty_choices_becomes_api_error_episode() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            response = _fake_response(tool_calls=_fake_tool_call())
+            response.choices = None
+            return response
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = OpenRouterAgent(api_key="not-used", model="test/model", client=client)
+
+    result = evaluate([example((1, 2, 3, 4, 5, 6, 7, 0, 8))], agent)
+
+    assert result.summary()["api_error"] == 1
+    assert agent.last_response_metadata["status"] == "api_error"
+    assert agent.last_response_metadata["error_type"] == "RuntimeError"
+
 
 def test_openrouter_retries_an_upstream_provider_error() -> None:
     class ProviderError(RuntimeError):
