@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
+from tqdm.auto import tqdm
 
 from evaluation.clients.openrouter import OpenRouterAgent
 from evaluation.constants import DEFAULT_OPENROUTER_BASE_URL
@@ -193,7 +194,12 @@ def rollout_futures(
                     config=config,
                 )
                 futures[future] = (example.example_id, rollout_id)
-        for future in as_completed(futures):
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc="Generating rollouts",
+            unit="rollout",
+        ):
             source_id, rollout_id = futures[future]
             try:
                 grouped[source_id].append(future.result())

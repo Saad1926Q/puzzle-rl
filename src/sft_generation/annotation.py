@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
+from tqdm.auto import tqdm
 
 from puzzle3.render import render
 from sft_generation.client import OpenRouterTextClient, TextCompletion
@@ -170,7 +171,12 @@ def annotation_futures(
                 )
                 future = pool.submit(annotate_step, trajectory, step_index, client=client)
                 tasks[future] = (trajectory, step_index)
-        for future in as_completed(tasks):
+        for future in tqdm(
+            as_completed(tasks),
+            total=len(tasks),
+            desc="Generating annotations",
+            unit="annotation",
+        ):
             trajectory, step_index = tasks[future]
             step = trajectory["steps"][step_index]
             key = (trajectory["source_id"], step["turn"])

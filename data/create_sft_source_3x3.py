@@ -18,7 +18,7 @@ from evaluation.generation import enumerate_from_goal, write_eval_jsonl, write_e
 from puzzle3.board import Board, GOAL
 
 DEPTHS = tuple(range(12, 17))
-TARGET_PER_DEPTH = 300
+TARGET_PER_DEPTH = 200
 EXPECTED_RECORDS = len(DEPTHS) * TARGET_PER_DEPTH
 DEFAULT_EXCLUSIONS = (
     Path("data/eval_puzzles_3x3_45.jsonl"),
@@ -104,7 +104,7 @@ def validate_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate 1,500 fresh 8-puzzle teacher-rollout boards at depths 12-16."
+        description="Generate 1,000 fresh 8-puzzle teacher-rollout boards at depths 12-16."
     )
     parser.add_argument(
         "--exclude-jsonl",
@@ -116,12 +116,12 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/sft_source_3x3_depths_12_16_1500.jsonl"),
+        default=Path("data/sft_source_3x3_depths_12_16_1000.jsonl"),
     )
     parser.add_argument(
         "--parquet-output",
         type=Path,
-        default=Path("data/sft_source_3x3_depths_12_16_1500.parquet"),
+        default=Path("data/sft_source_3x3_depths_12_16_1000.parquet"),
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()

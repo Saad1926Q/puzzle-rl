@@ -108,9 +108,9 @@ def test_sft_source_is_balanced_fresh_and_has_no_oracle_actions() -> None:
     excluded = {next(board for board, path in paths.items() if len(path) == 12)}
     records = generator["generate_sft_source"](random.Random(42), excluded)
 
-    assert len(records) == 1_500
+    assert len(records) == 1_000
     assert Counter(record["optimal_length"] for record in records) == {
-        depth: 300 for depth in range(12, 17)
+        depth: 200 for depth in range(12, 17)
     }
     assert len({tuple(record["board"]) for record in records}) == len(records)
     assert not ({tuple(record["board"]) for record in records} & excluded)

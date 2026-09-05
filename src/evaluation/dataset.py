@@ -42,7 +42,12 @@ class PuzzleExample:
         }
 
 
-def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
+def _make_example(
+    row: dict[str, Any],
+    example_id: str,
+    *,
+    require_optimal_actions: bool = True,
+) -> PuzzleExample:
     if "optimal_moves" in row:
         raise DatasetError(
             f"{example_id}: legacy optimal_moves is unsupported; "
@@ -63,16 +68,16 @@ def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
         )
 
     try:
-        raw_actions = row["optimal_actions"]
         optimal_length = row["optimal_length"]
     except (KeyError, TypeError) as exc:
-        raise DatasetError(
-            f"{example_id}: optimal_actions and optimal_length are required"
-        ) from exc
-
-    if not isinstance(raw_actions, (list, tuple)):
+        raise DatasetError(f"{example_id}: optimal_length is required") from exc
+    raw_actions = row.get("optimal_actions")
+    if raw_actions is None and not require_optimal_actions:
+        optimal_actions: tuple[TileAction, ...] = ()
+    elif not isinstance(raw_actions, (list, tuple)):
         raise DatasetError(f"{example_id}: optimal_actions must be a list of integers")
-    optimal_actions = tuple(raw_actions)
+    else:
+        optimal_actions = tuple(raw_actions)
     for index, action in enumerate(optimal_actions):
         if type(action) is not int:
             raise DatasetError(
@@ -85,21 +90,23 @@ def _make_example(row: dict[str, Any], example_id: str) -> PuzzleExample:
 
     if type(optimal_length) is not int:
         raise DatasetError(f"{example_id}: optimal_length must have exact type int")
-    if optimal_length != len(optimal_actions) or optimal_length < 0:
+    if optimal_length < 0:
+        raise DatasetError(f"{example_id}: optimal_length must be non-negative")
+    if require_optimal_actions and optimal_length != len(optimal_actions):
         raise DatasetError(
             f"{example_id}: optimal_length does not match optimal_actions"
         )
-
-    replayed = board
-    for index, action in enumerate(optimal_actions):
-        if action not in adjacent_tiles(replayed):
-            raise DatasetError(
-                f"{example_id}: optimal_actions[{index}]={action} is illegal "
-                f"from board {list(replayed)}"
-            )
-        replayed = slide_tile(replayed, action)
-    if replayed != GOAL:
-        raise DatasetError(f"{example_id}: optimal_actions do not solve the board")
+    if require_optimal_actions:
+        replayed = board
+        for index, action in enumerate(optimal_actions):
+            if action not in adjacent_tiles(replayed):
+                raise DatasetError(
+                    f"{example_id}: optimal_actions[{index}]={action} is illegal "
+                    f"from board {list(replayed)}"
+                )
+            replayed = slide_tile(replayed, action)
+        if replayed != GOAL:
+            raise DatasetError(f"{example_id}: optimal_actions do not solve the board")
 
     try:
         distance = exact_distance(board)
@@ -165,6 +172,7 @@ def load_examples(
     split: str = DEFAULT_SPLIT,
     limit: int | None = None,
     offset: int = 0,
+    require_optimal_actions: bool = True,
 ) -> list[PuzzleExample]:
     """Load a deterministic slice from Hugging Face or a local JSONL/Parquet file."""
 
@@ -182,6 +190,10 @@ def load_examples(
         )
 
     return [
-        _make_example(rows[index], f"{dataset}:{config}:{split}:{index}")
+        _make_example(
+            rows[index],
+            f"{dataset}:{config}:{split}:{index}",
+            require_optimal_actions=require_optimal_actions,
+        )
         for index in range(offset, end)
     ]

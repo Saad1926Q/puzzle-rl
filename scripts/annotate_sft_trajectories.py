@@ -112,6 +112,9 @@ def main() -> None:
         },
     )
     print(f"annotations={len(ordered_annotations)} datasets={len(records)}")
+    print(f"annotations saved at {annotations_path}")
+    print(f"SFT dataset saved at {dataset_path}")
+    print(f"annotation metadata saved at {output_dir / 'annotation_metadata.json'}")
 
 
 if __name__ == "__main__":

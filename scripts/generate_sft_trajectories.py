@@ -75,6 +75,7 @@ def main() -> None:
         split=args.split,
         limit=args.num_examples,
         offset=args.offset,
+        require_optimal_actions=False,
     )
     pending = [
         example
@@ -164,6 +165,9 @@ def main() -> None:
         },
     )
     print(f"processed={len(pending)} solved={solved_count} skipped={skipped_count}")
+    print(f"solved trajectories saved at {solved_path}")
+    print(f"skipped puzzles saved at {skipped_path}")
+    print(f"generation metadata saved at {args.output_dir / 'generation_metadata.json'}")
 
 
 if __name__ == "__main__":

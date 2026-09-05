@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from evaluation.dataset import PuzzleExample
+from evaluation.dataset import PuzzleExample, load_examples
 from evaluation.protocol import build_chat_completion_messages
 from puzzle3.board import GOAL
 from sft_generation.annotation import (
@@ -26,6 +26,29 @@ from sft_generation.rollout import (
 
 BOARD = (1, 2, 3, 4, 5, 6, 0, 7, 8)
 EXAMPLE = PuzzleExample("source-1", BOARD, (7, 8), 2, {})
+
+def test_source_dataset_does_not_require_optimal_actions(tmp_path) -> None:
+    path = tmp_path / "source.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "id": "source-1",
+                "board": list(BOARD),
+                "action_interface": "tile_id_v1",
+                "optimal_length": 2,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    examples = load_examples(
+        dataset=str(path),
+        require_optimal_actions=False,
+    )
+
+    assert examples[0].optimal_actions == ()
+    assert examples[0].optimal_length == 2
 
 
 def trajectory() -> dict:
