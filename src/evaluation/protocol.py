@@ -62,18 +62,15 @@ def build_chat_completion_messages(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
+    system_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the Chat Completions wire format used by Crof, GLM, DeepSeek, and Qwen.
-
-    Historical actions become assistant ``tool_calls`` followed by ``tool``
-    results. OpenAI's Responses API uses a different schema; use
-    ``build_openai_responses_input`` for that client.
-    """
+    """Build Chat Completions messages for one puzzle state."""
 
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT_WITH_HISTORY if history else SYSTEM_PROMPT,
+            "content": system_prompt
+            or (SYSTEM_PROMPT_WITH_HISTORY if history else SYSTEM_PROMPT),
         }
     ]
     if not history:
@@ -115,10 +112,16 @@ def build_openrouter_chat_completion_messages(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
+    system_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build OpenRouter messages while preserving native reasoning fields."""
 
-    messages = build_chat_completion_messages(board, history)
+    messages = build_chat_completion_messages(
+        board,
+        history,
+        include_reasoning=include_reasoning,
+        system_prompt=system_prompt,
+    )
     if not include_reasoning:
         return messages
 
@@ -126,6 +129,7 @@ def build_openrouter_chat_completion_messages(
         message for message in messages if message["role"] == "assistant"
     )
     for message, turn in zip(assistant_messages, history, strict=True):
+        message["content"] = ""
         if turn.reasoning_details:
             message["reasoning_details"] = turn.reasoning_details
         elif turn.reasoning:

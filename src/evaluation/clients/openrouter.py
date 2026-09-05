@@ -47,6 +47,7 @@ class OpenRouterAgent:
         quantizations: Sequence[str] = (),
         provider_retries: int = 2,
         retry_delay: float = 1.0,
+        system_prompt: str | None = None,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -83,6 +84,7 @@ class OpenRouterAgent:
         self.quantizations = tuple(quantizations)
         self.provider_retries = provider_retries
         self.retry_delay = retry_delay
+        self.system_prompt = system_prompt
         self.last_response_metadata: dict[str, Any] = {}
 
     def next_action(
@@ -107,7 +109,10 @@ class OpenRouterAgent:
         request = {
             "model": self.model,
             "messages": build_openrouter_chat_completion_messages(
-                board, history, include_reasoning=include_reasoning
+                board,
+                history,
+                include_reasoning=include_reasoning,
+                system_prompt=self.system_prompt,
             ),
             "tools": [SLIDE_TILE_TOOL],
             "tool_choice": "auto",
@@ -145,10 +150,16 @@ class OpenRouterAgent:
                 provider="OpenRouter",
                 truncated_reasons={"length"},
             )
-        except RuntimeError:
+        except RuntimeError as exc:
             self.last_response_metadata = {
-                "status": "invalid_response",
-                "error": "response did not contain a completion choice",
+                "status": "api_error",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "response_id": _response_field(response, "id"),
+                "resolved_model": _response_field(response, "model"),
+                "openrouter_metadata": json_safe(
+                    _response_field(response, "openrouter_metadata")
+                ),
             }
             raise
         response_metadata.update(
