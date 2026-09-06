@@ -4,12 +4,16 @@ import json
 
 
 import pytest
+import sft_generation.annotation as annotation_module
+from evaluation.constants import SYSTEM_PROMPT_WITH_HISTORY
 
 from evaluation.dataset import PuzzleExample, load_examples
 from evaluation.protocol import build_chat_completion_messages
 from puzzle3.board import GOAL
 from sft_generation.annotation import (
+    AnnotationConfig,
     annotate_step,
+    annotation_futures,
     annotation_messages,
     clean_rationale,
     validate_annotation,
@@ -164,6 +168,37 @@ def test_annotation_is_validated_without_changing_action() -> None:
     with pytest.raises(ValueError, match="10 to 30 words"):
         validate_annotation(long, trajectory(), 0)
 
+def test_annotation_batch_reuses_one_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    clients = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            clients.append(self)
+
+    def fake_annotate(trajectory, step_index, *, client):
+        step = trajectory["steps"][step_index]
+        return {
+            "source_id": trajectory["source_id"],
+            "turn": step["turn"],
+            "board": step["board"],
+            "tile": step["tile"],
+            "next_board": step["next_board"],
+            "rationale": "Sliding the verified tile advances the current puzzle-solving subgoal.",
+            "valid": True,
+        }
+
+    monkeypatch.setattr(annotation_module, "OpenRouterTextClient", Client)
+    monkeypatch.setattr(annotation_module, "annotate_step", fake_annotate)
+
+    annotation_futures(
+        [trajectory()],
+        api_key="unused",
+        config=AnnotationConfig(model="unused", base_url="unused"),
+        parallelism=1,
+    )
+
+    assert len(clients) == 1
+
 
 def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
     annotations = [
@@ -188,6 +223,7 @@ def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
     ]
     record = build_sft_record(trajectory(), annotations)
     assert record["prompt"][0]["role"] == "system"
+    assert record["prompt"][0]["content"] == SYSTEM_PROMPT_WITH_HISTORY
     assert [item["role"] for item in record["completion"]] == [
         "assistant", "tool", "assistant", "tool"
     ]

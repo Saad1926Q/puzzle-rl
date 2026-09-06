@@ -145,6 +145,22 @@ def annotation_futures(
     skip_keys = skip_keys or set()
     results: dict[tuple[str, int], dict[str, Any]] = {}
     tasks: dict[Future[dict[str, Any]], tuple[dict[str, Any], int]] = {}
+    client = OpenRouterTextClient(
+        api_key=api_key,
+        model=config.model,
+        base_url=config.base_url,
+        thinking=config.thinking,
+        reasoning_effort=config.reasoning_effort,
+        max_tokens=config.max_tokens,
+        temperature=config.temperature,
+        top_p=config.top_p,
+        upstream_providers=config.upstream_providers,
+        allow_fallbacks=config.allow_fallbacks,
+        require_parameters=config.require_parameters,
+        data_collection=config.data_collection,
+        provider_retries=config.provider_retries,
+        retry_delay=config.retry_delay,
+    )
     with ThreadPoolExecutor(max_workers=parallelism) as pool:
         for trajectory in trajectories:
             validate_trajectory(trajectory)
@@ -152,22 +168,6 @@ def annotation_futures(
                 key = (trajectory["source_id"], step["turn"])
                 if key in skip_keys:
                     continue
-                client = OpenRouterTextClient(
-                    api_key=api_key,
-                    model=config.model,
-                    base_url=config.base_url,
-                    thinking=config.thinking,
-                    reasoning_effort=config.reasoning_effort,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    top_p=config.top_p,
-                    upstream_providers=config.upstream_providers,
-                    allow_fallbacks=config.allow_fallbacks,
-                    require_parameters=config.require_parameters,
-                    data_collection=config.data_collection,
-                    provider_retries=config.provider_retries,
-                    retry_delay=config.retry_delay,
-                )
                 future = pool.submit(annotate_step, trajectory, step_index, client=client)
                 tasks[future] = (trajectory, step_index)
         for future in tqdm(

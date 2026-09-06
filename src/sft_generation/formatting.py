@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable
 
+from evaluation.constants import SYSTEM_PROMPT_WITH_HISTORY
 from puzzle3.render import render
 from sft_generation.annotation import validate_annotation
-from sft_generation.constants import SFT_SOLVING_PROMPT_WITH_HISTORY
 from sft_generation.rollout import validate_trajectory
 
 
@@ -65,7 +65,7 @@ def build_sft_record(
         )
     return {
         "prompt": [
-            {"role": "system", "content": SFT_SOLVING_PROMPT_WITH_HISTORY},
+            {"role": "system", "content": SYSTEM_PROMPT_WITH_HISTORY},
             {"role": "user", "content": board_message(trajectory["initial_board"])},
         ],
         "completion": completion,
