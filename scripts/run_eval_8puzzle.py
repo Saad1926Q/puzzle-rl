@@ -281,6 +281,13 @@ def resolve_provider_args(args: argparse.Namespace) -> None:
         args.reasoning_effort = DEFAULT_REASONING_EFFORT
 
 
+
+def validate_history_options(args: argparse.Namespace) -> None:
+    """Reject history options that conflict with a provider's transcript contract."""
+
+    if args.keep_reasoning and not args.keep_history:
+        raise ValueError("--keep-reasoning requires --keep-history")
+
 def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
     result = {
         "dataset": args.dataset,
@@ -327,8 +334,7 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
 def main() -> None:
     args = build_parser().parse_args()
     resolve_provider_args(args)
-    if args.keep_reasoning and not args.keep_history:
-        raise ValueError("--keep-reasoning requires --keep-history")
+    validate_history_options(args)
     provider = PROVIDERS[args.provider]
     if args.output is None:
         args.output = Path("eval") / provider.default_output

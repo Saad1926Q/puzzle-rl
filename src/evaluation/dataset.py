@@ -48,6 +48,19 @@ def _make_example(
     *,
     require_optimal_actions: bool = True,
 ) -> PuzzleExample:
+    """Validate one board record, including SFT puzzle-level validation rows."""
+    puzzle_metadata = row.get("metadata")
+    if (
+        isinstance(puzzle_metadata, dict)
+        and puzzle_metadata.get("record_type") == "puzzle"
+    ):
+        row = {
+            "id": puzzle_metadata["source_id"],
+            "board": puzzle_metadata["initial_board"],
+            "optimal_length": puzzle_metadata["initial_depth"],
+            "action_interface": ACTION_INTERFACE,
+        }
+        require_optimal_actions = False
     if "optimal_moves" in row:
         raise DatasetError(
             f"{example_id}: legacy optimal_moves is unsupported; "

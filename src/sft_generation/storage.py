@@ -34,14 +34,21 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
         os.fsync(file.fileno())
 
 
-def write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
+def write_jsonl(
+    path: Path,
+    records: Iterable[dict[str, Any]],
+    *,
+    sort_keys: bool = True,
+) -> None:
     """Replace a JSONL file through a temporary file."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8") as file:
         for record in records:
-            file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            file.write(
+                json.dumps(record, ensure_ascii=False, sort_keys=sort_keys) + "\n"
+            )
         file.flush()
         os.fsync(file.fileno())
     temporary.replace(path)

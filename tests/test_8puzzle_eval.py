@@ -606,6 +606,33 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
     assert agent.last_response_metadata["reasoning_content"] == "reason about the board"
 
 
+
+def test_qwen_replays_requested_reasoning_in_history_messages() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return _fake_response(tool_calls=_fake_tool_call())
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    agent = QwenAgent(client=client)
+    history = (
+        HistoryTurn(
+            (1, 2, 3, 4, 5, 6, 7, 0, 8),
+            tile=8,
+            reasoning="Move tile 8 into the blank.",
+        ),
+    )
+
+    agent.next_action(GOAL, history, include_reasoning=True)
+
+    assert completions.kwargs["messages"][2]["content"] == (
+        "Move tile 8 into the blank."
+    )
+
+
 def test_qwen_defaults_to_non_thinking_mode() -> None:
     class Completions:
         def create(self, **kwargs):

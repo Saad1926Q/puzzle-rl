@@ -89,6 +89,34 @@ uv run python data/generate_eval_data_3x3.py
 
 The generator exhaustively searches the solvable state space, groups puzzles by difficulty, and selects reproducible state quantiles within each group.
 
+## SFT Held-Out Validation
+
+The Hugging Face `sft` configuration uses all 3,745 teacher decision rows in
+its `train` split. Its `validation` split contains ten fresh puzzle starts:
+two puzzles at each exact depth from 6 through 10. These rows have
+`metadata.record_type == "puzzle"` and no teacher completion.
+
+Use the validation split for checkpoint selection by running complete
+autonomous rollouts and comparing solved rate, reward, illegal actions,
+timeouts, and moves:
+
+```bash
+uv run python scripts/run_eval_8puzzle.py \
+    --provider openrouter \
+    --model your-sft-checkpoint \
+    --dataset saad1926q/8-puzzle \
+    --config sft \
+    --split validation \
+    --num-rollouts 1 \
+    --parallelism 2 \
+    --save-trajectories \
+    --output eval/sft-validation.json
+```
+
+The model receives only the current board and environment results. It does not
+receive the stored teacher actions or annotations. Keep the `eval` and
+`exhaustive` configurations untouched for final evaluation.
+
 ## Metrics and Trajectories
 
 Evaluation reports:

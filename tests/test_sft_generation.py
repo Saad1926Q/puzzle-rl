@@ -19,7 +19,7 @@ from sft_generation.annotation import (
     validate_annotation,
 )
 from sft_generation.client import TextCompletion
-from sft_generation.formatting import build_sft_record
+from sft_generation.formatting import build_history_window_sft_records, build_sft_record
 from sft_generation.rollout import (
     RolloutConfig,
     run_rollout,
@@ -54,6 +54,37 @@ def test_source_dataset_does_not_require_optimal_actions(tmp_path) -> None:
     assert examples[0].optimal_actions == ()
     assert examples[0].optimal_length == 2
 
+
+
+def test_sft_puzzle_validation_record_loads_as_evaluation_task(tmp_path) -> None:
+    path = tmp_path / "validation.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "prompt": [],
+                "completion": [],
+                "metadata": {
+                    "record_type": "puzzle",
+                    "source_id": "sft-validation-0001",
+                    "initial_board": list(BOARD),
+                    "initial_depth": 2,
+                },
+                "tools": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    examples = load_examples(
+        dataset=str(path),
+        require_optimal_actions=False,
+    )
+
+    assert examples[0].example_id.endswith(":0")
+    assert examples[0].board == BOARD
+    assert examples[0].optimal_length == 2
+    assert examples[0].optimal_actions == ()
 
 def trajectory() -> dict:
     return {
@@ -230,3 +261,46 @@ def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
     call = record["completion"][0]["tool_calls"][0]
     assert json.loads(call["function"]["arguments"]) == {"tile": 7}
     assert "<think>" in record["completion"][0]["content"]
+
+
+def test_history_window_sft_records_match_evaluator_context() -> None:
+    annotations = [
+        {
+            "source_id": "source-1",
+            "turn": 1,
+            "board": list(BOARD),
+            "tile": 7,
+            "next_board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+            "rationale": "Sliding tile 7 places it into the open bottom-middle goal position.",
+            "valid": True,
+        },
+        {
+            "source_id": "source-1",
+            "turn": 2,
+            "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+            "tile": 8,
+            "next_board": list(GOAL),
+            "rationale": "Sliding tile 8 completes the final lower-right placement and solves the puzzle.",
+            "valid": True,
+        },
+    ]
+    records = build_history_window_sft_records(
+        trajectory(),
+        annotations,
+        history_turns=1,
+    )
+
+    assert len(records) == 2
+    assert [item["role"] for item in records[0]["prompt"]] == ["system", "user"]
+    assert [item["role"] for item in records[1]["prompt"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert records[0]["metadata"]["history_turns"] == 0
+    assert records[1]["metadata"]["history_turns"] == 1
+    assert records[1]["metadata"]["next_board"] == list(GOAL)
+    assert len(records[0]["completion"]) == 1
+    assert records[0]["completion"][0]["role"] == "assistant"
+    assert len(records[0]["completion"][0]["tool_calls"]) == 1
