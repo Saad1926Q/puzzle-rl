@@ -117,6 +117,41 @@ The model receives only the current board and environment results. It does not
 receive the stored teacher actions or annotations. Keep the `eval` and
 `exhaustive` configurations untouched for final evaluation.
 
+## SFT Training
+
+Install the TRL and PEFT dependencies with `uv sync`, then run the tokenizer
+and tool-schema preflight before training:
+
+```bash
+uv run python scripts/preflight_sft.py \
+    --model Qwen/Qwen3.5-0.8B \
+    --indices 0 4 1000
+```
+
+Run the step-bounded LoRA SFT job:
+
+```bash
+uv run python scripts/train_sft.py --config configs/sft.toml
+```
+
+The default run trains for 120 optimizer steps and saves checkpoints every
+10 steps. It trains only rows with `metadata.record_type == "decision"` and
+uses completion-only loss; the prompt and environment history are context,
+while the rationale and `slide_tile` call are targets.
+
+Evaluate all saved checkpoints locally on the ten fresh validation puzzles:
+
+```bash
+uv run python scripts/evaluate_sft_checkpoints.py \
+    --checkpoint-root outputs/sft/qwen3.5-0.8b \
+    --base-model Qwen/Qwen3.5-0.8B \
+    --num-rollouts 1 \
+    --output eval/sft-checkpoints.json
+```
+
+Select the checkpoint using held-out solve rate and reward. Run the final
+`eval` and `exhaustive` benchmarks only after selecting the checkpoint.
+
 ## Metrics and Trajectories
 
 Evaluation reports:
