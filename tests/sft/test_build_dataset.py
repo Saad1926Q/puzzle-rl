@@ -7,7 +7,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "build_sft_dataset",
-    Path(__file__).parents[1] / "scripts" / "build_sft_dataset.py",
+    Path(__file__).parents[2] / "scripts" / "build_sft_dataset.py",
 )
 assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)

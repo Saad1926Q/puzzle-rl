@@ -9,7 +9,7 @@ from puzzle3.board import GOAL, adjacent_tiles, slide_tile
 
 _SPEC = importlib.util.spec_from_file_location(
     "create_sft_validation_3x3",
-    Path(__file__).parents[1] / "data" / "create_sft_validation_3x3.py",
+    Path(__file__).parents[2] / "data" / "create_sft_validation_3x3.py",
 )
 assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
