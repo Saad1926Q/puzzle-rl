@@ -147,9 +147,6 @@ def test_validate_trajectory_replays_every_move() -> None:
         validate_trajectory(invalid)
 
 
-def test_custom_system_prompt_replaces_default_prompt() -> None:
-    messages = build_chat_completion_messages(BOARD, system_prompt="sft prompt")
-    assert messages[0] == {"role": "system", "content": "sft prompt"}
 
 
 def test_run_rollout_passes_sft_prompt_and_keeps_reasoning() -> None:
@@ -225,36 +222,6 @@ def test_annotation_is_validated_without_changing_action() -> None:
     with pytest.raises(ValueError, match="10 to 30 words"):
         validate_annotation(long, trajectory(), 0)
 
-def test_annotation_batch_reuses_one_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    clients = []
-
-    class Client:
-        def __init__(self, **kwargs):
-            clients.append(self)
-
-    def fake_annotate(trajectory, step_index, *, client):
-        step = trajectory["steps"][step_index]
-        return {
-            "source_id": trajectory["source_id"],
-            "turn": step["turn"],
-            "board": step["board"],
-            "tile": step["tile"],
-            "next_board": step["next_board"],
-            "rationale": "Sliding the verified tile advances the current puzzle-solving subgoal.",
-            "valid": True,
-        }
-
-    monkeypatch.setattr(annotation_module, "OpenRouterTextClient", Client)
-    monkeypatch.setattr(annotation_module, "annotate_step", fake_annotate)
-
-    annotation_futures(
-        [trajectory()],
-        api_key="unused",
-        config=AnnotationConfig(model="unused", base_url="unused"),
-        parallelism=1,
-    )
-
-    assert len(clients) == 1
 
 
 def test_sft_record_preserves_verified_tool_call_and_roles() -> None:

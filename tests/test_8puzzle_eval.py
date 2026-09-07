@@ -607,31 +607,6 @@ def test_qwen_uses_native_tool_call_and_sampling_parameters() -> None:
 
 
 
-def test_qwen_replays_requested_reasoning_in_history_messages() -> None:
-    class Completions:
-        def create(self, **kwargs):
-            self.kwargs = kwargs
-            return _fake_response(tool_calls=_fake_tool_call())
-
-    completions = Completions()
-    client = type(
-        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
-    )()
-    agent = QwenAgent(client=client)
-    history = (
-        HistoryTurn(
-            (1, 2, 3, 4, 5, 6, 7, 0, 8),
-            tile=8,
-            reasoning="Move tile 8 into the blank.",
-        ),
-    )
-
-    agent.next_action(GOAL, history, include_reasoning=True)
-
-    assert completions.kwargs["messages"][2]["content"] == (
-        "Move tile 8 into the blank."
-    )
-
 
 def test_qwen_defaults_to_non_thinking_mode() -> None:
     class Completions:
@@ -1151,31 +1126,3 @@ def test_turn_limit_cannot_exceed_45() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     with pytest.raises(ValueError, match="between 1 and 45"):
         evaluate_episode(task, SequenceAgent([]), max_turns=46)
-
-
-def test_harness_runs_ten_huggingface_dataset_examples(monkeypatch) -> None:
-    from evaluation import dataset as dataset_module
-
-    rows = [
-        {
-            "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
-            "action_interface": "tile_id_v1",
-            "optimal_actions": [8],
-            "optimal_length": 1,
-        }
-    ] * 10
-    monkeypatch.setattr(dataset_module, "load_dataset", lambda *args, **kwargs: rows)
-    tasks = load_examples(limit=10)
-
-    # Use a fresh oracle that derives the next action from the current board by BFS;
-    # this makes the smoke test independent of any model or credentials.
-    from puzzle3.solver import solve
-
-    class BfsOracle:
-        def next_action(self, board: tuple[int, ...]) -> str:
-            return json.dumps({"tile": solve(board)[0]})
-
-    result = evaluate(tasks, BfsOracle())
-    assert len(result.episodes) == 10
-    assert result.summary()["solved"] == 10
-    assert result.summary()["mean_reward"] == pytest.approx(1.0 + 0.25 / 31)

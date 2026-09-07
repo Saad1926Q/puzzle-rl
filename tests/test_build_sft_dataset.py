@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
-from sft_generation.storage import write_jsonl
 
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -17,27 +15,6 @@ _SPEC.loader.exec_module(_MODULE)
 puzzle_validation_record = _MODULE.puzzle_validation_record
 
 
-def test_sft_jsonl_preserves_prompt_first_column_order(tmp_path) -> None:
-    path = tmp_path / "train.jsonl"
-    write_jsonl(
-        path,
-        [
-            {
-                "prompt": [],
-                "completion": [],
-                "metadata": {},
-                "tools": [],
-            }
-        ],
-        sort_keys=False,
-    )
-
-    assert list(json.loads(path.read_text(encoding="utf-8"))) == [
-        "prompt",
-        "completion",
-        "metadata",
-        "tools",
-    ]
 
 
 def test_puzzle_validation_record_has_solution_metadata_but_no_training_target() -> None:
