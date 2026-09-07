@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
 import re
 from pathlib import Path
@@ -91,7 +92,7 @@ class LocalCheckpointAgent:
             add_generation_prompt=True,
             return_tensors="pt",
         )
-        if isinstance(encoded, dict):
+        if isinstance(encoded, Mapping) or hasattr(encoded, "input_ids"):
             model_inputs = {
                 key: value.to(self.device) if hasattr(value, "to") else value
                 for key, value in encoded.items()
@@ -99,7 +100,7 @@ class LocalCheckpointAgent:
             input_length = model_inputs["input_ids"].shape[-1]
         else:
             model_inputs = {"input_ids": encoded.to(self.device)}
-            input_length = encoded.shape[-1]
+            input_length = model_inputs["input_ids"].shape[-1]
         with torch.inference_mode():
             generated = self.model.generate(
                 **model_inputs,
