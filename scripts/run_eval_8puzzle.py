@@ -4,7 +4,7 @@
 Example:
     uv run python scripts/run_eval_8puzzle.py \
       --provider qwen \
-      --model Qwen/Qwen3.5-0.8B \
+      --model Qwen/Qwen3.5-4B \
       --base-url http://localhost:8000/v1
 """
 

@@ -1,9 +1,9 @@
 # Step-based LoRA SFT configuration for the 8-puzzle decision dataset.
-model = "Qwen/Qwen3.5-0.8B"
+model = "Qwen/Qwen3.5-4B"
 dataset = "saad1926q/8-puzzle"
 dataset_config = "sft"
 dataset_split = "train"
-output_dir = "outputs/sft/qwen3.5-0.8b"
+output_dir = "outputs/sft/qwen3.5-4b"
 max_steps = 120
 save_steps = 10
 save_total_limit = 6

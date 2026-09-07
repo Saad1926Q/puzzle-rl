@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=bootstrap_args.config)
-    parser.add_argument("--model", default=defaults.get("model", "Qwen/Qwen3.5-0.8B"))
+    parser.add_argument("--model", default=defaults.get("model", "Qwen/Qwen3.5-4B"))
     parser.add_argument("--dataset", default=defaults.get("dataset", "saad1926q/8-puzzle"))
     parser.add_argument("--dataset-config", default=defaults.get("dataset_config", "sft"))
     parser.add_argument("--dataset-split", default=defaults.get("dataset_split", "train"))

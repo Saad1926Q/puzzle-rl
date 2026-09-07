@@ -124,7 +124,7 @@ and tool-schema preflight before training:
 
 ```bash
 uv run python scripts/preflight_sft.py \
-    --model Qwen/Qwen3.5-0.8B \
+    --model Qwen/Qwen3.5-4B \
     --indices 0 4 1000
 ```
 
@@ -143,8 +143,8 @@ Evaluate all saved checkpoints locally on the ten fresh validation puzzles:
 
 ```bash
 uv run python scripts/evaluate_sft_checkpoints.py \
-    --checkpoint-root outputs/sft/qwen3.5-0.8b \
-    --base-model Qwen/Qwen3.5-0.8B \
+    --checkpoint-root outputs/sft/qwen3.5-4b \
+    --base-model Qwen/Qwen3.5-4B \
     --num-rollouts 1 \
     --output eval/sft-checkpoints.json
 ```
@@ -223,7 +223,7 @@ The evaluator connects to an already-running OpenAI-compatible server; it does
 not start or manage vLLM. Start vLLM in a separate environment or terminal:
 
 ```bash
-vllm serve Qwen/Qwen3.5-0.8B \
+vllm serve Qwen/Qwen3.5-4B \
     --port 8000 \
     --max-model-len 4096 \
     --language-model-only \
@@ -236,7 +236,7 @@ Then run the evaluator:
 ```bash
 uv run python scripts/run_eval_8puzzle.py \
     --provider qwen \
-    --model Qwen/Qwen3.5-0.8B \
+    --model Qwen/Qwen3.5-4B \
     --base-url http://localhost:8000/v1 \
     --dataset data/eval_puzzles_3x3_45.jsonl \
     --num-rollouts 8 \
@@ -244,7 +244,7 @@ uv run python scripts/run_eval_8puzzle.py \
     --max-tokens 256 \
     --no-thinking \
     --save-trajectories \
-    --output eval/qwen3.5-0.8b.json
+    --output eval/qwen3.5-4b.json
 ```
 
 Qwen uses its native `slide_tile` tool-call format through vLLM. The local

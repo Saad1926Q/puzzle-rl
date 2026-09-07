@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint-root", type=Path, required=True)
     parser.add_argument("--checkpoints", nargs="+")
-    parser.add_argument("--base-model", default="Qwen/Qwen3.5-0.8B")
+    parser.add_argument("--base-model", default="Qwen/Qwen3.5-4B")
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
     parser.add_argument("--config", default="sft")
     parser.add_argument("--split", default="validation")

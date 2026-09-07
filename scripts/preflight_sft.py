@@ -12,7 +12,7 @@ from sft_generation.training import render_training_record, validate_decision_re
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="Qwen/Qwen3.5-0.8B")
+    parser.add_argument("--model", default="Qwen/Qwen3.5-4B")
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
     parser.add_argument("--dataset-config", default="sft")
     parser.add_argument("--split", default="train")
