@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from time import sleep
 from typing import Any, Sequence
 
 from evaluation.clients.common import api_error_metadata, validate_reasoning_effort
+from evaluation.clients.openrouter_transport import (
+    create_openrouter_client,
+    execute_openrouter_request,
+    is_retryable_transport_error,
+    openrouter_extra_body,
+)
 from evaluation.constants import DEFAULT_OPENROUTER_BASE_URL
 from evaluation.protocol import json_safe
-
 
 @dataclass(frozen=True)
 class TextCompletion:
@@ -48,9 +52,7 @@ class OpenRouterTextClient:
         if provider_retries < 0 or retry_delay < 0:
             raise ValueError("retry settings must be non-negative")
         if client is None:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = create_openrouter_client(api_key=api_key, base_url=base_url)
         self.client = client
         self.model = model
         self.thinking = thinking
@@ -69,41 +71,31 @@ class OpenRouterTextClient:
     def complete(self, messages: list[dict[str, Any]]) -> TextCompletion:
         """Return one visible completion for the supplied messages."""
 
-        provider: dict[str, Any] = {
-            "allow_fallbacks": self.allow_fallbacks,
-            "require_parameters": self.require_parameters,
-            "data_collection": self.data_collection,
-        }
-        if self.upstream_providers:
-            provider["only"] = list(self.upstream_providers)
         request = {
             "model": self.model,
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
-            "extra_body": {
-                "reasoning": (
-                    {"enabled": True, "exclude": False}
-                    if self.thinking and self.reasoning_effort is None
-                    else {
-                        "effort": self.reasoning_effort if self.thinking else "none",
-                        "exclude": False,
-                    }
-                ),
-                "provider": provider,
-            },
+            "extra_body": openrouter_extra_body(
+                thinking=self.thinking,
+                reasoning_effort=self.reasoning_effort,
+                allow_fallbacks=self.allow_fallbacks,
+                require_parameters=self.require_parameters,
+                data_collection=self.data_collection,
+                upstream_providers=self.upstream_providers,
+            ),
         }
-        for attempt in range(self.provider_retries + 1):
-            try:
-                response = self.client.chat.completions.create(**request)
-                break
-            except Exception as exc:
-                if attempt < self.provider_retries and _retryable(exc):
-                    sleep(self.retry_delay * (attempt + 1))
-                    continue
-                self.last_response_metadata = api_error_metadata(exc)
-                raise
+        try:
+            response = execute_openrouter_request(
+                lambda: self.client.chat.completions.create(**request),
+                provider_retries=self.provider_retries,
+                retry_delay=self.retry_delay,
+                is_retryable=is_retryable_transport_error,
+            )
+        except Exception as exc:
+            self.last_response_metadata = api_error_metadata(exc)
+            raise
         try:
             choice = response.choices[0]
             message = choice.message
@@ -138,10 +130,3 @@ def _text(value: Any) -> str:
     if isinstance(value, list):
         return "".join(block.get("text", "") for block in value if isinstance(block, dict))
     return ""
-
-
-def _retryable(exc: Exception) -> bool:
-    """Return whether an upstream request is safe to retry."""
-
-    status = getattr(exc, "status_code", None)
-    return status in {408, 409, 429} or isinstance(status, int) and status >= 500

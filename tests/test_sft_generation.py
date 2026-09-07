@@ -14,7 +14,7 @@ from sft_generation.annotation import (
     clean_rationale,
     validate_annotation,
 )
-from sft_generation.client import TextCompletion
+from sft_generation.client import OpenRouterTextClient, TextCompletion
 from sft_generation.formatting import build_history_window_sft_records, build_sft_record
 from sft_generation.records import Trajectory
 from sft_generation.rollout import (
@@ -298,3 +298,85 @@ def test_history_window_sft_records_match_evaluator_context() -> None:
     assert len(records[0]["completion"]) == 1
     assert records[0]["completion"][0]["role"] == "assistant"
     assert len(records[0]["completion"][0]["tool_calls"]) == 1
+
+
+def test_openrouter_text_client_sends_annotation_routing_and_metadata() -> None:
+    class Completions:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            message = type(
+                "Message",
+                (),
+                {
+                    "content": [{"text": "Slide tile 7 into the blank space."}],
+                    "reasoning_content": "This is the legal move.",
+                },
+            )()
+            choice = type("Choice", (), {"message": message, "finish_reason": "stop"})()
+            return type(
+                "Response",
+                (),
+                {
+                    "choices": [choice],
+                    "usage": {"total_tokens": 12},
+                    "id": "gen-annotation",
+                    "model": "qwen/qwen3.5-27b",
+                },
+            )()
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    result = OpenRouterTextClient(
+        api_key="not-used",
+        model="qwen/qwen3.5-27b",
+        client=client,
+        thinking=False,
+        upstream_providers=("together",),
+        require_parameters=False,
+    ).complete([{"role": "user", "content": "Annotate this move."}])
+
+    assert result.content == "Slide tile 7 into the blank space."
+    assert completions.kwargs["extra_body"] == {
+        "reasoning": {"effort": "none", "exclude": False},
+        "provider": {
+            "allow_fallbacks": False,
+            "require_parameters": False,
+            "data_collection": "deny",
+            "only": ["together"],
+        },
+    }
+    assert result.metadata["response_id"] == "gen-annotation"
+    assert result.metadata["resolved_model"] == "qwen/qwen3.5-27b"
+    assert result.metadata["reasoning_content_length"] == 23
+
+
+def test_openrouter_text_client_retries_transient_errors() -> None:
+    class TransientError(RuntimeError):
+        status_code = 503
+
+    class Completions:
+        calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise TransientError("provider unavailable")
+            message = type("Message", (), {"content": "Try again."})()
+            choice = type("Choice", (), {"message": message, "finish_reason": "stop"})()
+            return type("Response", (), {"choices": [choice]})()
+
+    completions = Completions()
+    client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+    )()
+    result = OpenRouterTextClient(
+        api_key="not-used",
+        model="test/model",
+        client=client,
+        retry_delay=0,
+    ).complete([{"role": "user", "content": "Try again."}])
+
+    assert result.content == "Try again."
+    assert completions.calls == 2

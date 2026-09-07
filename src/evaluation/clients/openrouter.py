@@ -1,15 +1,18 @@
 """OpenRouter Chat Completions client for reproducible teacher evaluations."""
 
 from __future__ import annotations
-from time import sleep
-
-
 from typing import Any, Sequence
 
 from evaluation.clients.common import (
     api_error_metadata,
     parse_chat_response,
     validate_reasoning_effort,
+)
+from evaluation.clients.openrouter_transport import (
+    create_openrouter_client,
+    execute_openrouter_request,
+    is_retryable_transport_error,
+    openrouter_extra_body,
 )
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
@@ -51,9 +54,7 @@ class OpenRouterAgent:
         client: Any | None = None,
     ) -> None:
         if client is None:
-            from openai import OpenAI
-
-            client = OpenAI(
+            client = create_openrouter_client(
                 api_key=api_key,
                 base_url=base_url,
                 default_headers={
@@ -94,18 +95,6 @@ class OpenRouterAgent:
         *,
         include_reasoning: bool = False,
     ) -> str:
-        provider: dict[str, Any] = {
-            "allow_fallbacks": self.allow_fallbacks,
-            "require_parameters": self.require_parameters,
-            "data_collection": self.data_collection,
-        }
-        if self.upstream_providers:
-            provider["only"] = list(self.upstream_providers)
-        if self.quantizations:
-            provider["quantizations"] = list(self.quantizations)
-        if self.distillable_only:
-            provider["enforce_distillable_text"] = True
-
         request = {
             "model": self.model,
             "messages": build_openrouter_chat_completion_messages(
@@ -119,31 +108,27 @@ class OpenRouterAgent:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
-            "extra_body": {
-                "reasoning": (
-                    {
-                        "enabled": True,
-                        "exclude": False,
-                    }
-                    if self.thinking and self.reasoning_effort is None
-                    else {
-                        "effort": self.reasoning_effort if self.thinking else "none",
-                        "exclude": False,
-                    }
-                ),
-                "provider": provider,
-            },
+            "extra_body": openrouter_extra_body(
+                thinking=self.thinking,
+                reasoning_effort=self.reasoning_effort,
+                allow_fallbacks=self.allow_fallbacks,
+                require_parameters=self.require_parameters,
+                data_collection=self.data_collection,
+                upstream_providers=self.upstream_providers,
+                quantizations=self.quantizations,
+                distillable_only=self.distillable_only,
+            ),
         }
-        for attempt in range(self.provider_retries + 1):
-            try:
-                response = self.client.chat.completions.create(**request)
-                break
-            except Exception as exc:
-                if attempt < self.provider_retries and _is_retryable_provider_error(exc):
-                    sleep(self.retry_delay * (attempt + 1))
-                    continue
-                self.last_response_metadata = api_error_metadata(exc)
-                raise
+        try:
+            response = execute_openrouter_request(
+                lambda: self.client.chat.completions.create(**request),
+                provider_retries=self.provider_retries,
+                retry_delay=self.retry_delay,
+                is_retryable=_is_retryable_provider_error,
+            )
+        except Exception as exc:
+            self.last_response_metadata = api_error_metadata(exc)
+            raise
         try:
             result, response_metadata = parse_chat_response(
                 response,
@@ -188,10 +173,7 @@ def _response_field(response: Any, name: str) -> Any:
 
 def _is_retryable_provider_error(exc: Exception) -> bool:
     """Identify transport and upstream-provider failures worth retrying."""
-    status_code = getattr(exc, "status_code", None)
-    if status_code in {408, 409, 429} or (
-        isinstance(status_code, int) and status_code >= 500
-    ):
+    if is_retryable_transport_error(exc):
         return True
     body = getattr(exc, "body", None)
     if not isinstance(body, dict):
