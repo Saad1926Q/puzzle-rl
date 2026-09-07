@@ -20,13 +20,13 @@ This repository provides:
 - a tile-based tool interface for language models;
 - exact solution distances and optimal paths;
 - a fixed, mixed-difficulty evaluation set;
-- adapters for DeepSeek, GLM, and OpenAI models;
+- adapters for CrofAI, DeepSeek, GLM, OpenAI, OpenRouter, and Qwen models;
 - multi-rollout evaluation with separate trajectory files;
 - rewards suitable for later RL experiments.
 
-Each model request contains the current board. Pass `--keep-history` to also
-include the previous four board/action turns; pass `--keep-reasoning` with it to
-include their available reasoning text.
+Evaluation includes the previous four completed board/action turns and their
+available reasoning by default. Use `--history actions` to omit reasoning or
+`--history none` to send only the current board.
 
 ## Action Interface
 
@@ -305,9 +305,8 @@ Useful options include:
 --parallelism N      run independent episodes concurrently
 --max-turns N        limit each episode to at most 45 actions
 --no-thinking        disable model reasoning when supported
---reasoning-effort   choose low, medium, high, or max
---keep-history       include the previous four board/action turns
---keep-reasoning     also include available reasoning; requires --keep-history
+--reasoning-effort   choose minimal, low, medium, high, max, or xhigh
+--history MODE       use none, actions, or reasoning history (default: reasoning)
 --max-tokens N       set the response token budget
 ```
 
