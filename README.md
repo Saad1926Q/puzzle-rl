@@ -130,8 +130,13 @@ uv run python scripts/preflight_sft.py \
 Run the step-bounded LoRA SFT job:
 
 ```bash
+export WANDB_PROJECT=puzzle-rl-sft
 uv run python scripts/train_sft.py --config configs/sft.toml
 ```
+
+Authenticate once with `uv run wandb login` before training. The default
+configuration logs training metrics to Weights & Biases; use
+`--report-to none` to disable logging for a local-only run.
 
 The default run trains for 120 optimizer steps and saves checkpoints every
 10 steps. It trains only rows with `metadata.record_type == "decision"` and

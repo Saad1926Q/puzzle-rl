@@ -19,4 +19,4 @@ gradient_checkpointing = true
 lora_r = 16
 lora_alpha = 32
 lora_dropout = 0.05
-report_to = "none"
+report_to = "wandb"
