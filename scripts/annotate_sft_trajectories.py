@@ -10,6 +10,7 @@ from evaluation.protocol import DEFAULT_API_KEY_ENV, get_api_key
 from sft_generation.annotation import AnnotationConfig, annotation_futures
 from sft_generation.constants import DEFAULT_ANNOTATION_MAX_TOKENS, DEFAULT_TEACHER_MODEL
 from sft_generation.formatting import build_sft_record
+from sft_generation.records import Trajectory
 from sft_generation.storage import append_jsonl, read_jsonl, write_json, write_jsonl
 
 
@@ -42,7 +43,7 @@ def main() -> None:
     """Annotate missing moves and rebuild complete SFT records."""
 
     args = parse_args()
-    trajectories = list(read_jsonl(args.input))
+    trajectories = [Trajectory.from_dict(record) for record in read_jsonl(args.input)]
     output_dir = args.input.parent
     annotations_path = args.annotations_output or output_dir / "annotations.jsonl"
     dataset_path = args.dataset_output or output_dir / "sft_dataset.jsonl"
@@ -52,10 +53,10 @@ def main() -> None:
         if record.get("valid")
     }
     missing = {
-        (trajectory["source_id"], step["turn"])
+        (trajectory.source_id, step.turn)
         for trajectory in trajectories
-        for step in trajectory["steps"]
-        if (trajectory["source_id"], step["turn"]) not in stored
+        for step in trajectory.steps
+        if (trajectory.source_id, step.turn) not in stored
     }
     config = AnnotationConfig(
         model=args.model,
@@ -86,13 +87,13 @@ def main() -> None:
     ordered_annotations = [stored[key] for key in sorted(stored)]
     write_jsonl(annotations_path, ordered_annotations)
     records = []
-    for trajectory in sorted(trajectories, key=lambda item: item["source_id"]):
+    for trajectory in sorted(trajectories, key=lambda item: item.source_id):
         annotations = [
-            stored[(trajectory["source_id"], step["turn"])]
-            for step in trajectory["steps"]
-            if (trajectory["source_id"], step["turn"]) in stored
+            stored[(trajectory.source_id, step.turn)]
+            for step in trajectory.steps
+            if (trajectory.source_id, step.turn) in stored
         ]
-        if len(annotations) != len(trajectory["steps"]) or not all(
+        if len(annotations) != len(trajectory.steps) or not all(
             item.get("valid") for item in annotations
         ):
             continue

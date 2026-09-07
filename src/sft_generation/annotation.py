@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 from puzzle3.render import render
 from sft_generation.client import OpenRouterTextClient, TextCompletion
 from sft_generation.constants import ANNOTATION_PROMPT, DEFAULT_ANNOTATION_MAX_TOKENS
-from sft_generation.rollout import validate_trajectory
+from sft_generation.records import Trajectory
 
 
 @dataclass(frozen=True)
@@ -33,19 +33,18 @@ class AnnotationConfig:
 
 
 def annotation_messages(
-    trajectory: dict[str, Any], step_index: int, *, context_turns: int = 4
+    trajectory: Trajectory, step_index: int, *, context_turns: int = 4
 ) -> list[dict[str, str]]:
     """Build one annotation request from a verified move."""
 
-    validate_trajectory(trajectory)
-    steps = trajectory["steps"]
+    steps = trajectory.steps
     step = steps[step_index]
     start = max(0, step_index - context_turns)
     context = []
     for prior in steps[start:step_index]:
         context.append(
-            f"Turn {prior['turn']}: {render(tuple(prior['board']))} -> "
-            f"tile {prior['tile']} -> {render(tuple(prior['next_board']))}"
+            f"Turn {prior.turn}: {render(prior.board)} -> "
+            f"tile {prior.tile} -> {render(prior.next_board)}"
         )
     context_text = "\n".join(context) if context else "(no previous moves)"
     user = "\n".join(
@@ -53,9 +52,9 @@ def annotation_messages(
             "Goal board: 1 2 3 / 4 5 6 / 7 8 0",
             "Verified solving context:",
             context_text,
-            f"Current board:\n{render(tuple(step['board']))}",
-            f"Verified selected tile: {step['tile']}",
-            f"Resulting board:\n{render(tuple(step['next_board']))}",
+            f"Current board:\n{render(step.board)}",
+            f"Verified selected tile: {step.tile}",
+            f"Resulting board:\n{render(step.next_board)}",
             "Explain this verified move.",
         )
     )
@@ -79,22 +78,20 @@ def clean_rationale(content: str) -> str:
 
 
 def validate_annotation(
-    annotation: dict[str, Any], trajectory: dict[str, Any], step_index: int
+    annotation: dict[str, Any], trajectory: Trajectory, step_index: int
 ) -> None:
     """Validate annotation identity, mechanics, and concise wording."""
 
-    validate_trajectory(trajectory)
-    steps = trajectory["steps"]
-    step = steps[step_index]
-    if annotation.get("source_id") != trajectory["source_id"]:
+    step = trajectory.steps[step_index]
+    if annotation.get("source_id") != trajectory.source_id:
         raise ValueError("annotation source_id does not match trajectory")
-    if annotation.get("turn") != step["turn"]:
+    if annotation.get("turn") != step.turn:
         raise ValueError("annotation turn does not match trajectory")
-    if annotation.get("board") != step["board"]:
+    if annotation.get("board") != list(step.board):
         raise ValueError("annotation board does not match trajectory")
-    if annotation.get("tile") != step["tile"]:
+    if annotation.get("tile") != step.tile:
         raise ValueError("annotation tile does not match trajectory")
-    if annotation.get("next_board") != step["next_board"]:
+    if annotation.get("next_board") != list(step.next_board):
         raise ValueError("annotation next_board does not match trajectory")
     rationale = annotation.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
@@ -108,21 +105,21 @@ def validate_annotation(
 
 
 def annotate_step(
-    trajectory: dict[str, Any],
+    trajectory: Trajectory,
     step_index: int,
     *,
     client: OpenRouterTextClient,
 ) -> dict[str, Any]:
     """Generate one validated rationale record."""
 
-    step = trajectory["steps"][step_index]
+    step = trajectory.steps[step_index]
     completion: TextCompletion = client.complete(annotation_messages(trajectory, step_index))
     annotation = {
-        "source_id": trajectory["source_id"],
-        "turn": step["turn"],
-        "board": step["board"],
-        "tile": step["tile"],
-        "next_board": step["next_board"],
+        "source_id": trajectory.source_id,
+        "turn": step.turn,
+        "board": list(step.board),
+        "tile": step.tile,
+        "next_board": list(step.next_board),
         "rationale": clean_rationale(completion.content),
         "valid": True,
         "response_metadata": completion.metadata,
@@ -132,7 +129,7 @@ def annotate_step(
 
 
 def annotation_futures(
-    trajectories: Iterable[dict[str, Any]],
+    trajectories: Iterable[Trajectory],
     *,
     api_key: str,
     config: AnnotationConfig,
@@ -144,7 +141,7 @@ def annotation_futures(
 
     skip_keys = skip_keys or set()
     results: dict[tuple[str, int], dict[str, Any]] = {}
-    tasks: dict[Future[dict[str, Any]], tuple[dict[str, Any], int]] = {}
+    tasks: dict[Future[dict[str, Any]], tuple[Trajectory, int]] = {}
     client = OpenRouterTextClient(
         api_key=api_key,
         model=config.model,
@@ -163,9 +160,8 @@ def annotation_futures(
     )
     with ThreadPoolExecutor(max_workers=parallelism) as pool:
         for trajectory in trajectories:
-            validate_trajectory(trajectory)
-            for step_index, step in enumerate(trajectory["steps"]):
-                key = (trajectory["source_id"], step["turn"])
+            for step_index, step in enumerate(trajectory.steps):
+                key = (trajectory.source_id, step.turn)
                 if key in skip_keys:
                     continue
                 future = pool.submit(annotate_step, trajectory, step_index, client=client)
@@ -177,17 +173,17 @@ def annotation_futures(
             unit="annotation",
         ):
             trajectory, step_index = tasks[future]
-            step = trajectory["steps"][step_index]
-            key = (trajectory["source_id"], step["turn"])
+            step = trajectory.steps[step_index]
+            key = (trajectory.source_id, step.turn)
             try:
                 annotation = future.result()
             except Exception as exc:
                 annotation = {
-                    "source_id": trajectory["source_id"],
-                    "turn": step["turn"],
-                    "board": step["board"],
-                    "tile": step["tile"],
-                    "next_board": step["next_board"],
+                    "source_id": trajectory.source_id,
+                    "turn": step.turn,
+                    "board": list(step.board),
+                    "tile": step.tile,
+                    "next_board": list(step.next_board),
                     "rationale": "",
                     "valid": False,
                     "error": str(exc),

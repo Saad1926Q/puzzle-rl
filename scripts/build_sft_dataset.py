@@ -9,6 +9,7 @@ from typing import Any
 
 from puzzle3.board import adjacent_tiles
 from sft_generation.formatting import build_history_window_sft_records
+from sft_generation.records import Trajectory
 from sft_generation.storage import read_jsonl, write_json, write_jsonl
 
 
@@ -56,8 +57,8 @@ def main() -> None:
         raise ValueError("history-turns must be non-negative")
 
     trajectories = sorted(
-        list(read_jsonl(args.trajectories)),
-        key=lambda item: str(item["source_id"]),
+        (Trajectory.from_dict(record) for record in read_jsonl(args.trajectories)),
+        key=lambda trajectory: trajectory.source_id,
     )
     annotations_by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for annotation in read_jsonl(args.annotations):
@@ -65,7 +66,7 @@ def main() -> None:
 
     train_records: list[dict[str, Any]] = []
     for trajectory in trajectories:
-        source_id = str(trajectory["source_id"])
+        source_id = trajectory.source_id
         train_records.extend(
             build_history_window_sft_records(
                 trajectory,
@@ -98,9 +99,7 @@ def main() -> None:
             "trajectory_count": len(trajectories),
             "train_record_count": len(train_records),
             "validation_puzzle_count": len(validation_records),
-            "train_source_ids": [
-                str(trajectory["source_id"]) for trajectory in trajectories
-            ],
+            "train_source_ids": [trajectory.source_id for trajectory in trajectories],
             "validation_source_ids": [
                 str(puzzle["id"]) for puzzle in validation_puzzles
             ],

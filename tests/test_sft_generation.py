@@ -16,6 +16,7 @@ from sft_generation.annotation import (
 )
 from sft_generation.client import TextCompletion
 from sft_generation.formatting import build_history_window_sft_records, build_sft_record
+from sft_generation.records import Trajectory
 from sft_generation.rollout import (
     RolloutConfig,
     run_rollout,
@@ -135,6 +136,10 @@ def trajectory() -> dict:
     }
 
 
+def typed_trajectory() -> Trajectory:
+    return Trajectory.from_dict(trajectory())
+
+
 def test_validate_trajectory_replays_every_move() -> None:
     validate_trajectory(trajectory())
     invalid = trajectory()
@@ -194,7 +199,7 @@ def test_trajectory_record_contains_verified_steps() -> None:
 
 
 def test_annotation_prompt_contains_verified_move_context() -> None:
-    messages = annotation_messages(trajectory(), 0)
+    messages = annotation_messages(typed_trajectory(), 0)
     assert "Verified selected tile: 7" in messages[1]["content"]
     assert "exact distance" in messages[0]["content"]
 
@@ -204,7 +209,7 @@ def test_annotation_is_validated_without_changing_action() -> None:
         def complete(self, messages):
             return TextCompletion("Sliding tile 7 places it into the open bottom-middle goal position.", {})
 
-    result = annotate_step(trajectory(), 0, client=Client())
+    result = annotate_step(typed_trajectory(), 0, client=Client())
     assert result["valid"] is True
     assert result["tile"] == 7
     assert clean_rationale("<think>  A useful move. </think>") == "A useful move."
@@ -213,10 +218,10 @@ def test_annotation_is_validated_without_changing_action() -> None:
         "rationale": "The solver selected this move because it is optimal for solving.",
     }
     with pytest.raises(ValueError, match="forbidden"):
-        validate_annotation(bad, trajectory(), 0)
+        validate_annotation(bad, typed_trajectory(), 0)
     long = {**result, "rationale": " ".join(["Move"] * 31)}
     with pytest.raises(ValueError, match="10 to 30 words"):
-        validate_annotation(long, trajectory(), 0)
+        validate_annotation(long, typed_trajectory(), 0)
 
 
 
@@ -241,7 +246,7 @@ def test_sft_record_preserves_verified_tool_call_and_roles() -> None:
             "valid": True,
         },
     ]
-    record = build_sft_record(trajectory(), annotations)
+    record = build_sft_record(typed_trajectory(), annotations)
     assert record["prompt"][0]["role"] == "system"
     assert record["prompt"][0]["content"] == SYSTEM_PROMPT_WITH_HISTORY
     assert [item["role"] for item in record["completion"]] == [
@@ -274,7 +279,7 @@ def test_history_window_sft_records_match_evaluator_context() -> None:
         },
     ]
     records = build_history_window_sft_records(
-        trajectory(),
+        typed_trajectory(),
         annotations,
         history_turns=1,
     )
