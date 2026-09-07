@@ -13,7 +13,11 @@ from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
-from sft_generation.training import is_decision_record, validate_decision_record
+from sft_generation.training import (
+    is_decision_record,
+    normalize_tool_arguments,
+    validate_decision_record,
+)
 
 DEFAULT_CONFIG = Path("configs/sft.toml")
 
@@ -62,11 +66,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_decision_dataset(args: argparse.Namespace) -> Dataset:
-    """Load only supervised decision rows from the SFT configuration."""
+    """Load and normalize supervised decision rows from the SFT configuration."""
     dataset = load_dataset(args.dataset, args.dataset_config, split=args.dataset_split)
     decision_rows = dataset.filter(is_decision_record)
     if len(decision_rows) == 0:
         raise ValueError("SFT training dataset contains no decision rows")
+    decision_rows = decision_rows.map(normalize_tool_arguments)
     for row in decision_rows.select(range(min(8, len(decision_rows)))):
         validate_decision_record(row)
     return decision_rows

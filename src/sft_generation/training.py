@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+import copy
+import json
 from typing import Any
-
 DECISION_RECORD_TYPE = "decision"
 
 
@@ -34,9 +36,28 @@ def validate_decision_record(record: dict[str, Any]) -> None:
         raise ValueError("SFT decision must contain one tool schema")
 
 
+def normalize_tool_arguments(record: dict[str, Any]) -> dict[str, Any]:
+    """Convert OpenAI wire-format argument strings to template mappings."""
+    normalized = copy.deepcopy(record)
+    for messages_key in ("prompt", "completion"):
+        for message in normalized.get(messages_key, []):
+            for tool_call in message.get("tool_calls", []):
+                function = tool_call.get("function", tool_call)
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        parsed = json.loads(arguments)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError("tool-call arguments are not valid JSON") from exc
+                    if not isinstance(parsed, dict):
+                        raise ValueError("tool-call arguments must decode to an object")
+                    function["arguments"] = parsed
+    return normalized
+
+
 def _token_ids(value: Any) -> list[int]:
     """Normalize tokenizer output from list or tensor-like values."""
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         value = value["input_ids"]
     if hasattr(value, "tolist"):
         value = value.tolist()
@@ -48,15 +69,16 @@ def _token_ids(value: Any) -> list[int]:
 def render_training_record(tokenizer: Any, record: dict[str, Any]) -> dict[str, int]:
     """Render one record and return prompt/completion token lengths."""
     validate_decision_record(record)
-    prompt = record["prompt"]
-    completion = record["completion"]
-    tools = record["tools"]
+    normalized = normalize_tool_arguments(record)
+    prompt = normalized["prompt"]
+    completion = normalized["completion"]
+    tools = normalized["tools"]
     prompt_ids = _token_ids(
         tokenizer.apply_chat_template(
             prompt,
             tools=tools,
             tokenize=True,
-            add_generation_prompt=True,
+            add_generation_prompt=False,
         )
     )
     full_ids = _token_ids(
