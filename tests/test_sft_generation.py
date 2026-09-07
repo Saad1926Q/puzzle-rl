@@ -86,6 +86,32 @@ def test_sft_puzzle_validation_record_loads_as_evaluation_task(tmp_path) -> None
     assert examples[0].optimal_length == 2
     assert examples[0].optimal_actions == ()
 
+
+def test_sft_puzzle_validation_record_validates_solution_metadata(tmp_path) -> None:
+    path = tmp_path / "validation-with-actions.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "prompt": [],
+                "completion": [],
+                "metadata": {
+                    "record_type": "puzzle",
+                    "source_id": "sft-validation-0001",
+                    "initial_board": list(BOARD),
+                    "initial_depth": 2,
+                    "optimal_actions": [7, 8],
+                },
+                "tools": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    examples = load_examples(dataset=str(path))
+
+    assert examples[0].optimal_actions == (7, 8)
+
 def trajectory() -> dict:
     return {
         "source_id": "source-1",

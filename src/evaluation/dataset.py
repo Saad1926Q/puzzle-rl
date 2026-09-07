@@ -54,13 +54,17 @@ def _make_example(
         isinstance(puzzle_metadata, dict)
         and puzzle_metadata.get("record_type") == "puzzle"
     ):
+        optimal_actions = puzzle_metadata.get("optimal_actions")
         row = {
             "id": puzzle_metadata["source_id"],
             "board": puzzle_metadata["initial_board"],
             "optimal_length": puzzle_metadata["initial_depth"],
             "action_interface": ACTION_INTERFACE,
         }
-        require_optimal_actions = False
+        if optimal_actions is None:
+            require_optimal_actions = False
+        else:
+            row["optimal_actions"] = optimal_actions
     if "optimal_moves" in row:
         raise DatasetError(
             f"{example_id}: legacy optimal_moves is unsupported; "

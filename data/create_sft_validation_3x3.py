@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from evaluation.constants import ACTION_INTERFACE
-from evaluation.generation import enumerate_from_goal, write_eval_jsonl, write_eval_parquet
-from puzzle3.board import Board, GOAL
+from evaluation.generation import (
+    enumerate_from_goal,
+    solution_from_goal_path,
+    write_eval_jsonl,
+    write_eval_parquet,
+)
+from puzzle3.board import Board, GOAL, TileAction
 
 DEPTHS = tuple(range(6, 11))
 TARGET_TOTAL = 10
@@ -49,24 +54,28 @@ def generate_validation_puzzles(
     excluded_boards: set[Board],
 ) -> list[dict[str, Any]]:
     """Sample two fresh boards at each exact depth from 6 through 10."""
-    candidates_by_depth: dict[int, list[Board]] = defaultdict(list)
+    candidates_by_depth: dict[int, list[tuple[Board, list[TileAction]]]] = defaultdict(
+        list
+    )
     for board, path_from_goal in enumerate_from_goal().items():
         depth = len(path_from_goal)
         if depth in DEPTHS and board not in excluded_boards:
-            candidates_by_depth[depth].append(board)
+            candidates_by_depth[depth].append((board, path_from_goal))
 
     records: list[dict[str, Any]] = []
     for depth in DEPTHS:
-        candidates = sorted(candidates_by_depth[depth])
+        candidates = sorted(candidates_by_depth[depth], key=lambda item: item[0])
         if len(candidates) < TARGET_PER_DEPTH:
             raise ValueError(
                 f"depth {depth}: requested {TARGET_PER_DEPTH} puzzles but only "
                 f"{len(candidates)} remain after exclusions"
             )
-        for board in rng.sample(candidates, TARGET_PER_DEPTH):
+        for board, path_from_goal in rng.sample(candidates, TARGET_PER_DEPTH):
+            optimal_actions = solution_from_goal_path(path_from_goal)
             records.append(
                 {
                     "board": list(board),
+                    "optimal_actions": optimal_actions,
                     "optimal_length": depth,
                     "action_interface": ACTION_INTERFACE,
                 }
@@ -82,7 +91,7 @@ def generate_validation_puzzles(
 def validate_records(
     records: list[dict[str, Any]], excluded_boards: set[Board]
 ) -> None:
-    """Validate count, depth balance, uniqueness, and board reservations."""
+    """Validate count, depth balance, solutions, and board reservations."""
     if len(records) != TARGET_TOTAL:
         raise ValueError(f"expected {TARGET_TOTAL} records, got {len(records)}")
     if Counter(record["optimal_length"] for record in records) != Counter(
@@ -94,9 +103,12 @@ def validate_records(
         raise ValueError("validation records contain duplicate boards")
     if set(boards) & excluded_boards:
         raise ValueError("validation records overlap reserved boards")
-    if any("optimal_actions" in record for record in records):
-        raise ValueError("validation records must not expose optimal actions")
-
+    for record in records:
+        actions = record.get("optimal_actions")
+        if not isinstance(actions, list):
+            raise ValueError("validation records must include optimal_actions lists")
+        if len(actions) != record["optimal_length"]:
+            raise ValueError("optimal_actions length must match optimal_length")
 
 def main() -> None:
     """Generate ten fresh validation puzzles and write JSONL/Parquet."""

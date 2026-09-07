@@ -40,11 +40,12 @@ def test_sft_jsonl_preserves_prompt_first_column_order(tmp_path) -> None:
     ]
 
 
-def test_puzzle_validation_record_has_no_training_target() -> None:
+def test_puzzle_validation_record_has_solution_metadata_but_no_training_target() -> None:
     record = puzzle_validation_record(
         {
             "id": "sft-validation-0001",
             "board": [1, 2, 3, 4, 5, 6, 0, 7, 8],
+            "optimal_actions": [7, 8],
             "optimal_length": 2,
             "action_interface": "tile_id_v1",
         }
@@ -55,4 +56,5 @@ def test_puzzle_validation_record_has_no_training_target() -> None:
     assert record["tools"] == []
     assert record["metadata"]["record_type"] == "puzzle"
     assert record["metadata"]["initial_depth"] == 2
+    assert record["metadata"]["optimal_actions"] == [7, 8]
     assert record["metadata"]["legal_tiles"] == [4, 7]

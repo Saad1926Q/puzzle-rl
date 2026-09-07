@@ -38,6 +38,7 @@ def puzzle_validation_record(puzzle: dict[str, Any]) -> dict[str, Any]:
             "history_turns": 0,
             "initial_board": list(board),
             "initial_depth": puzzle["optimal_length"],
+            "optimal_actions": list(puzzle["optimal_actions"]),
             "board": list(board),
             "legal_tiles": list(adjacent_tiles(board)),
             "tile": 0,

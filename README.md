@@ -94,8 +94,8 @@ The generator exhaustively searches the solvable state space, groups puzzles by 
 The Hugging Face `sft` configuration uses all 3,745 teacher decision rows in
 its `train` split. Its `validation` split contains ten fresh puzzle starts:
 two puzzles at each exact depth from 6 through 10. These rows have
-`metadata.record_type == "puzzle"` and no teacher completion.
-
+`metadata.record_type == "puzzle"` and include verified `optimal_actions` for
+evaluation metadata; the model never receives those actions.
 Use the validation split for checkpoint selection by running complete
 autonomous rollouts and comparing solved rate, reward, illegal actions,
 timeouts, and moves:
@@ -152,6 +152,38 @@ uv run python scripts/evaluate_sft_checkpoints.py \
     --num-rollouts 1 \
     --output eval/sft-checkpoints.json
 ```
+
+For parallel single-GPU evaluation, use the vLLM backend. Start vLLM once
+with runtime LoRA loading enabled:
+
+```bash
+export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
+vllm serve Qwen/Qwen3.5-4B \
+    --enable-lora \
+    --max-lora-rank 16 \
+    --max-num-seqs 2 \
+    --max-model-len 4096 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --port 8000
+```
+
+Then pass only the checkpoint root. The evaluator discovers checkpoints in
+numeric order, loads each adapter into vLLM, evaluates its puzzles with
+parallel requests, unloads the adapter, and continues:
+
+```bash
+uv run python scripts/evaluate_sft_checkpoints.py \
+    --backend vllm \
+    --checkpoint-root outputs/sft/qwen3.5-4b \
+    --vllm-base-url http://localhost:8000/v1 \
+    --parallelism 2 \
+    --num-rollouts 1 \
+    --output eval/sft-checkpoints-vllm.json
+```
+
+Turns within one puzzle remain sequential; `--parallelism` runs independent
+puzzles concurrently through the single vLLM model.
 
 Select the checkpoint using held-out solve rate and reward. Run the final
 `eval` and `exhaustive` benchmarks only after selecting the checkpoint.

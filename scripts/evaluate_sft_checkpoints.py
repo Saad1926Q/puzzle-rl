@@ -21,7 +21,76 @@ from evaluation.protocol import (
     build_chat_completion_messages,
     parse_tile,
 )
+from evaluation.clients.qwen import QwenAgent
+from evaluation.vllm import RuntimeLoRAController
 
+
+def positive_int(value: str) -> int:
+    """Parse a strictly positive integer CLI argument."""
+
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
+def evaluate_checkpoint(
+    checkpoint: Path,
+    examples: list[Any],
+    args: argparse.Namespace,
+    *,
+    controller: RuntimeLoRAController | None = None,
+) -> EvaluationResult:
+    """Evaluate one checkpoint using the selected local or vLLM backend."""
+
+    if args.backend == "vllm":
+        assert controller is not None
+        adapter_name = checkpoint.name
+        controller.load(adapter_name, checkpoint)
+        try:
+            def make_agent() -> QwenAgent:
+                return QwenAgent(
+                    model=adapter_name,
+                    base_url=args.vllm_base_url,
+                    thinking=args.thinking,
+                    reasoning_effort=args.reasoning_effort,
+                    max_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                )
+
+            return evaluate(
+                examples,
+                agent_factory=make_agent,
+                max_turns=args.max_turns,
+                num_rollouts=args.num_rollouts,
+                parallelism=args.parallelism,
+                keep_history=args.keep_history,
+                keep_reasoning=args.keep_reasoning,
+            )
+        finally:
+            controller.unload(adapter_name)
+
+    if args.parallelism != 1:
+        raise ValueError("local checkpoint evaluation requires --parallelism 1")
+    agent = LocalCheckpointAgent(
+        checkpoint,
+        base_model=args.base_model,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+    )
+    try:
+        return evaluate(
+            examples,
+            agent=agent,
+            max_turns=args.max_turns,
+            num_rollouts=args.num_rollouts,
+            keep_history=args.keep_history,
+            keep_reasoning=args.keep_reasoning,
+        )
+    finally:
+        del agent
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 def checkpoint_paths(root: Path, requested: list[str] | None) -> list[Path]:
     """Resolve checkpoints in numeric step order."""
@@ -137,14 +206,23 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint-root", type=Path, required=True)
     parser.add_argument("--checkpoints", nargs="+")
+    parser.add_argument("--backend", choices=("local", "vllm"), default="local")
     parser.add_argument("--base-model", default="Qwen/Qwen3.5-4B")
+    parser.add_argument("--vllm-base-url", default="http://localhost:8000/v1")
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
     parser.add_argument("--config", default="sft")
     parser.add_argument("--split", default="validation")
-    parser.add_argument("--num-rollouts", type=int, default=1)
-    parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-turns", type=positive_int, default=DEFAULT_MAX_TURNS)
+    parser.add_argument("--num-rollouts", type=positive_int, default=1)
+    parser.add_argument("--parallelism", type=positive_int, default=1)
+    parser.add_argument("--max-new-tokens", type=positive_int, default=256)
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--thinking", action="store_true")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("low", "medium", "xhigh"),
+        default="low",
+    )
     parser.add_argument("--keep-history", action="store_true", default=True)
     parser.add_argument("--keep-reasoning", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
@@ -153,32 +231,28 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.backend == "local" and args.parallelism != 1:
+        raise ValueError("local checkpoint evaluation requires --parallelism 1")
     examples = load_examples(
         dataset=args.dataset,
         config=args.config,
         split=args.split,
-        require_optimal_actions=False,
+    )
+    checkpoints = checkpoint_paths(args.checkpoint_root, args.checkpoints)
+    controller = (
+        RuntimeLoRAController(args.vllm_base_url)
+        if args.backend == "vllm"
+        else None
     )
     results: dict[str, Any] = {}
-    for checkpoint in checkpoint_paths(args.checkpoint_root, args.checkpoints):
-        agent = LocalCheckpointAgent(
+    for checkpoint in checkpoints:
+        evaluation = evaluate_checkpoint(
             checkpoint,
-            base_model=args.base_model,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-        )
-        evaluation: EvaluationResult = evaluate(
             examples,
-            agent=agent,
-            max_turns=args.max_turns,
-            num_rollouts=args.num_rollouts,
-            keep_history=args.keep_history,
-            keep_reasoning=args.keep_reasoning,
+            args,
+            controller=controller,
         )
         results[checkpoint.name] = evaluation.to_dict()
-        del agent
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
