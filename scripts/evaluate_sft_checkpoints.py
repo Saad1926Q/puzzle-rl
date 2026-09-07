@@ -85,6 +85,12 @@ class LocalCheckpointAgent:
             history,
             include_reasoning=include_reasoning,
         )
+        for message in messages:
+            for tool_call in message.get("tool_calls", []):
+                function = tool_call.get("function", tool_call)
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    function["arguments"] = json.loads(arguments)
         encoded = self.tokenizer.apply_chat_template(
             messages,
             tools=[SLIDE_TILE_TOOL],
