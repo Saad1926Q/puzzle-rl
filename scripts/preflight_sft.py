@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
     parser.add_argument("--dataset-config", default="sft")
     parser.add_argument("--split", default="train")
-    parser.add_argument("--indices", type=int, nargs="+", default=[0, 4, 1000])
+    parser.add_argument("--indices", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--max-length", type=int, default=2048)
     return parser.parse_args()
 

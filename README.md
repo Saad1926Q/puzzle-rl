@@ -124,8 +124,7 @@ and tool-schema preflight before training:
 
 ```bash
 uv run python scripts/preflight_sft.py \
-    --model Qwen/Qwen3.5-4B \
-    --indices 0 4 1000
+    --model Qwen/Qwen3.5-4B
 ```
 
 Run the step-bounded LoRA SFT job:
