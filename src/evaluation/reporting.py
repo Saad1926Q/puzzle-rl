@@ -38,6 +38,7 @@ def metadata(
         "base_url": settings.base_url,
         "thinking": settings.thinking,
         "reasoning_effort": settings.reasoning_effort,
+        "max_tokens": settings.max_tokens,
         "temperature": args.temperature,
         "top_p": args.top_p,
         "top_k": args.top_k,
