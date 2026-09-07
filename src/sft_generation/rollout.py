@@ -12,7 +12,8 @@ from evaluation.constants import DEFAULT_OPENROUTER_BASE_URL
 from evaluation.dataset import PuzzleExample
 from evaluation.evaluator import EpisodeResult, evaluate_episode
 from evaluation.protocol import get_api_key
-from puzzle3.board import Board, GOAL, adjacent_tiles, is_solved, slide_tile
+from puzzle3.board import GOAL
+from sft_generation.records import Trajectory
 from sft_generation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
@@ -125,46 +126,13 @@ def trajectory_record(episode: EpisodeResult) -> dict[str, Any]:
                 "response_metadata": step.response_metadata,
             }
         )
-    validate_trajectory(record)
+    Trajectory.from_dict(record)
     return record
 
 
 def validate_trajectory(record: dict[str, Any]) -> None:
-    """Replay a trajectory and reject any inconsistent transition."""
-
-    board = _board(record.get("initial_board"), "initial_board")
-    steps = record.get("steps")
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("trajectory must contain at least one step")
-    for expected_turn, step in enumerate(steps, start=1):
-        if not isinstance(step, dict) or step.get("turn") != expected_turn:
-            raise ValueError("trajectory turns must be contiguous")
-        if _board(step.get("board"), "step board") != board:
-            raise ValueError(f"turn {expected_turn} has an incorrect board")
-        tile = step.get("tile")
-        if type(tile) is not int or tile not in adjacent_tiles(board):
-            raise ValueError(f"turn {expected_turn} has an illegal tile")
-        next_board = slide_tile(board, tile)
-        if _board(step.get("next_board"), "next_board") != next_board:
-            raise ValueError(f"turn {expected_turn} has an incorrect next board")
-        board = next_board
-    if not is_solved(board) or board != GOAL:
-        raise ValueError("trajectory does not end at the goal")
-    if record.get("moves_taken") != len(steps):
-        raise ValueError("moves_taken does not match the step count")
-    if _board(record.get("final_board"), "final_board") != board:
-        raise ValueError("final_board does not match the replay")
-
-
-def _board(value: Any, field: str) -> Board:
-    """Validate and convert one serialized board."""
-
-    if not isinstance(value, list | tuple) or len(value) != 9:
-        raise ValueError(f"{field} must contain nine integers")
-    board = tuple(value)
-    if any(type(tile) is not int for tile in board) or set(board) != set(GOAL):
-        raise ValueError(f"{field} must be a permutation of 0 through 8")
-    return board
+    """Replay a serialized trajectory through the typed record parser."""
+    Trajectory.from_dict(record)
 
 
 def rollout_futures(
