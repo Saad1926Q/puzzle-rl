@@ -13,10 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
-
 from evaluation.constants import (
-    ACTION_INTERFACE,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
     DEFAULT_QWEN_PRESENCE_PENALTY,
@@ -24,14 +21,13 @@ from evaluation.constants import (
     DEFAULT_QWEN_TEMPERATURE,
     DEFAULT_QWEN_TOP_K,
     DEFAULT_QWEN_TOP_P,
-    DISTANCE_PROGRESS_WEIGHT,
-    MAX_PUZZLE_DISTANCE,
     MAX_TURNS,
-    REWARD_SCHEME,
 )
 from evaluation.dataset import load_examples
-from evaluation.evaluator import EvaluationResult, evaluate
+from evaluation.evaluator import evaluate
 from evaluation.providers import PROVIDERS, ProviderSettings, create_agent_factory
+from evaluation.reporting import metadata, write_evaluation_artifacts
+from evaluation.results import EvaluationResult
 
 
 
@@ -185,50 +181,6 @@ def history_options(history: str) -> tuple[bool, bool]:
 
 
 
-def metadata(
-    args: argparse.Namespace,
-    actual_num_examples: int,
-    settings: ProviderSettings,
-) -> dict[str, Any]:
-    result = {
-        "dataset": args.dataset,
-        "config": args.config,
-        "split": args.split,
-        "num_examples": actual_num_examples,
-        "num_rollouts": args.num_rollouts,
-        "parallelism": args.parallelism,
-        "offset": args.offset,
-        "max_turns": args.max_turns,
-        "provider": settings.provider,
-        "model": settings.model,
-        "base_url": settings.base_url,
-        "thinking": settings.thinking,
-        "reasoning_effort": settings.reasoning_effort,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "top_k": args.top_k,
-        "presence_penalty": args.presence_penalty,
-        "repetition_penalty": args.repetition_penalty,
-        "keep_history": args.history != "none",
-        "keep_reasoning": args.history == "reasoning",
-        "save_trajectories": args.save_trajectories,
-        "action_interface": ACTION_INTERFACE,
-        "reward_scheme": REWARD_SCHEME,
-        "distance_progress_weight": DISTANCE_PROGRESS_WEIGHT,
-        "max_puzzle_distance": MAX_PUZZLE_DISTANCE,
-    }
-    if args.provider == "openrouter":
-        result.update(
-            {
-                "openrouter_upstreams": args.openrouter_upstream,
-                "openrouter_allow_fallbacks": args.openrouter_allow_fallbacks,
-                "openrouter_require_parameters": not args.openrouter_relax_parameters,
-                "openrouter_quantizations": args.openrouter_quantization,
-                "openrouter_data_collection": args.openrouter_data_collection,
-                "openrouter_distillable_only": args.openrouter_distillable_only,
-            }
-        )
-    return result
 
 
 def main() -> None:
@@ -257,26 +209,11 @@ def main() -> None:
         agent_factory=agent_factory,
     )
     run_metadata = metadata(args, len(examples), settings)
-    summary_output = {"metadata": run_metadata, "summary": result.summary()}
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    trajectory_path: Path | None = None
-    if args.save_trajectories:
-        trajectory_path = args.output.with_name(
-            f"{args.output.stem}.trajectories{args.output.suffix or '.json'}"
-        )
-        trajectory_output = {
-            "metadata": run_metadata,
-            "summary": result.summary(),
-            "episodes": [episode.to_dict() for episode in result.episodes],
-        }
-        trajectory_path.write_text(
-            json.dumps(trajectory_output, indent=2) + "\n", encoding="utf-8"
-        )
-        summary_output["trajectory_file"] = str(trajectory_path)
-
-    args.output.write_text(
-        json.dumps(summary_output, indent=2) + "\n", encoding="utf-8"
+    trajectory_path = write_evaluation_artifacts(
+        args.output,
+        run_metadata=run_metadata,
+        result=result,
+        save_trajectories=args.save_trajectories,
     )
     print(json.dumps(result.summary(), indent=2))
     print(f"Wrote summary to {args.output}")

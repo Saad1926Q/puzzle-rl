@@ -7,12 +7,10 @@ import pytest
 from datasets import Dataset
 
 from evaluation.dataset import DatasetError, PuzzleExample, load_examples
-from evaluation.evaluator import (
-    evaluate,
-    evaluate_episode,
-    distance_progress_reward,
-    solved_reward,
-)
+from evaluation.evaluator import evaluate, evaluate_episode
+from evaluation.reporting import metadata, write_evaluation_artifacts
+from evaluation.results import EpisodeResult, EvaluationResult, StepResult
+from evaluation.rewards import distance_progress_reward, solved_reward
 from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
@@ -41,6 +39,15 @@ class SequenceAgent:
 
 def example(board: tuple[int, ...], optimal_length: int = 1) -> PuzzleExample:
     return PuzzleExample("test", board, tuple(), optimal_length, {})
+
+def test_evaluator_keeps_legacy_result_and_reward_exports() -> None:
+    from evaluation import evaluator
+
+    assert evaluator.StepResult is StepResult
+    assert evaluator.EpisodeResult is EpisodeResult
+    assert evaluator.EvaluationResult is EvaluationResult
+    assert evaluator.solved_reward is solved_reward
+    assert evaluator.distance_progress_reward is distance_progress_reward
 
 
 def test_parser_requires_one_valid_tile() -> None:
@@ -651,6 +658,40 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     assert crof_settings.model == "glm-5.3-flash"
     assert crof_settings.base_url == "https://crof.ai/v1"
     assert crof_settings.api_key_env == "CROF_API_KEY"
+
+
+def test_reporting_preserves_summary_and_trajectory_artifact_schemas(tmp_path) -> None:
+    import runpy
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    args = runner["build_parser"]().parse_args(["--provider", "qwen"])
+    args.save_trajectories = True
+    settings = runner["ProviderSettings"].from_args(args)
+    result = evaluate(
+        [example((1, 2, 3, 4, 5, 6, 7, 0, 8))],
+        SequenceAgent(['{"tile": 8}']),
+    )
+    output = tmp_path / "summary.json"
+    run_metadata = metadata(args, 1, settings)
+
+    trajectory_path = write_evaluation_artifacts(
+        output,
+        run_metadata=run_metadata,
+        result=result,
+        save_trajectories=args.save_trajectories,
+    )
+
+    assert trajectory_path == tmp_path / "summary.trajectories.json"
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "metadata": run_metadata,
+        "summary": result.summary(),
+        "trajectory_file": str(trajectory_path),
+    }
+    assert json.loads(trajectory_path.read_text(encoding="utf-8")) == {
+        "metadata": run_metadata,
+        "summary": result.summary(),
+        "episodes": [episode.to_dict() for episode in result.episodes],
+    }
 
 
 
