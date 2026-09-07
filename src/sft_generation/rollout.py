@@ -12,7 +12,6 @@ from evaluation.constants import DEFAULT_OPENROUTER_BASE_URL
 from evaluation.dataset import PuzzleExample
 from evaluation.evaluator import EpisodeResult, evaluate_episode
 from evaluation.protocol import get_api_key
-from puzzle3.board import GOAL
 from sft_generation.records import Trajectory
 from sft_generation.constants import (
     DEFAULT_MAX_TOKENS,

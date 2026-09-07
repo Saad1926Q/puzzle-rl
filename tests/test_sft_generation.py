@@ -4,16 +4,12 @@ import json
 
 
 import pytest
-import sft_generation.annotation as annotation_module
 from evaluation.constants import SYSTEM_PROMPT_WITH_HISTORY
 
 from evaluation.dataset import PuzzleExample, load_examples
-from evaluation.protocol import build_chat_completion_messages
 from puzzle3.board import GOAL
 from sft_generation.annotation import (
-    AnnotationConfig,
     annotate_step,
-    annotation_futures,
     annotation_messages,
     clean_rationale,
     validate_annotation,
