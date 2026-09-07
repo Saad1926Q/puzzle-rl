@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any
 
-from evaluation.clients.common import api_error_metadata, parse_chat_response
+from evaluation.clients.common import ChatCompletionAgent
 from evaluation.constants import (
     DEFAULT_GLM_BASE_URL,
     DEFAULT_GLM_MODEL,
     DEFAULT_MAX_TOKENS,
     DEFAULT_THINKING,
-    SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import HistoryTurn, build_chat_completion_messages
-from puzzle3.board import Board
 
 
-class GLMAgent:
-    """One-request-per-state GLM-4.5-Air adapter."""
+class GLMAgent(ChatCompletionAgent):
+    """GLM configuration for the shared Chat Completions adapter."""
 
     def __init__(
         self,
@@ -34,52 +31,23 @@ class GLMAgent:
             from openai import OpenAI
 
             client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
-        self.model = model
         self.thinking = thinking
-        # Kept for consistent CLI metadata; GLM-4.5-Air controls thinking with
-        # thinking.type rather than a per-level reasoning_effort parameter.
+        # Kept for consistent CLI metadata; GLM controls thinking with
+        # ``thinking.type`` rather than a per-level reasoning parameter.
         self.reasoning_effort = reasoning_effort
-        self.max_tokens = max_tokens
-        self.last_response_metadata: dict[str, Any] = {}
+        super().__init__(
+            client=client,
+            model=model,
+            max_tokens=max_tokens,
+            provider="GLM",
+            truncated_reasons={"length", "model_context_window_exceeded"},
+            request_options=self._request_options,
+        )
 
-    def next_action(
-        self,
-        board: Board,
-        history: Sequence[HistoryTurn] = (),
-        *,
-        include_reasoning: bool = False,
-    ) -> str:
-        request: dict[str, Any] = {
-            "model": self.model,
-            "messages": build_chat_completion_messages(
-                board, history, include_reasoning=include_reasoning
-            ),
-            "tools": [SLIDE_TILE_TOOL],
-            # Z.AI currently supports only auto tool selection.
+    def _request_options(self) -> dict[str, Any]:
+        return {
             "tool_choice": "auto",
-            "max_tokens": self.max_tokens,
             "extra_body": {
-                "thinking": {
-                    "type": "enabled" if self.thinking else "disabled",
-                }
+                "thinking": {"type": "enabled" if self.thinking else "disabled"}
             },
         }
-        try:
-            response = self.client.chat.completions.create(**request)
-        except Exception as exc:
-            self.last_response_metadata = api_error_metadata(exc)
-            raise
-        try:
-            result, self.last_response_metadata = parse_chat_response(
-                response,
-                provider="GLM",
-                truncated_reasons={"length", "model_context_window_exceeded"},
-            )
-        except RuntimeError:
-            self.last_response_metadata = {
-                "status": "invalid_response",
-                "error": "response did not contain a completion choice",
-            }
-            raise
-        return result

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any
 
-from evaluation.clients.common import api_error_metadata, parse_chat_response
+from evaluation.clients.common import ChatCompletionAgent
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_QWEN_BASE_URL,
@@ -14,14 +14,11 @@ from evaluation.constants import (
     DEFAULT_QWEN_TEMPERATURE,
     DEFAULT_QWEN_TOP_K,
     DEFAULT_QWEN_TOP_P,
-    SLIDE_TILE_TOOL,
 )
-from evaluation.protocol import HistoryTurn, build_chat_completion_messages
-from puzzle3.board import Board
 
 
-class QwenAgent:
-    """One-request-per-state Qwen3.5 adapter for a local compatible server."""
+class QwenAgent(ChatCompletionAgent):
+    """Qwen3.5 configuration for the shared Chat Completions adapter."""
 
     def __init__(
         self,
@@ -47,41 +44,33 @@ class QwenAgent:
             raise ValueError("top_k must be positive")
         if repetition_penalty <= 0:
             raise ValueError("repetition_penalty must be positive")
+        if reasoning_effort not in {"low", "medium", "xhigh"}:
+            raise ValueError("reasoning_effort must be low, medium, or xhigh")
         if client is None:
             from openai import OpenAI
 
             client = OpenAI(api_key=api_key, base_url=base_url)
 
-        self.client = client
-        self.model = model
         self.thinking = thinking
-        if reasoning_effort not in {"low", "medium", "xhigh"}:
-            raise ValueError("reasoning_effort must be low, medium, or xhigh")
         self.reasoning_effort = reasoning_effort
-        self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
         self.top_k = top_k
         self.presence_penalty = presence_penalty
         self.repetition_penalty = repetition_penalty
-        self.last_response_metadata: dict[str, Any] = {}
+        super().__init__(
+            client=client,
+            model=model,
+            max_tokens=max_tokens,
+            provider="Qwen",
+            truncated_reasons={"length"},
+            request_options=self._request_options,
+        )
 
-    def next_action(
-        self,
-        board: Board,
-        history: Sequence[HistoryTurn] = (),
-        *,
-        include_reasoning: bool = False,
-    ) -> str:
-        request: dict[str, Any] = {
-            "model": self.model,
-            "messages": build_chat_completion_messages(
-                board, history, include_reasoning=include_reasoning
-            ),
-            "tools": [SLIDE_TILE_TOOL],
+    def _request_options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {
             "tool_choice": "auto",
             "parallel_tool_calls": False,
-            "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
             "presence_penalty": self.presence_penalty,
@@ -92,22 +81,5 @@ class QwenAgent:
             },
         }
         if self.thinking:
-            request["reasoning_effort"] = self.reasoning_effort
-        try:
-            response = self.client.chat.completions.create(**request)
-        except Exception as exc:
-            self.last_response_metadata = api_error_metadata(exc)
-            raise
-        try:
-            result, self.last_response_metadata = parse_chat_response(
-                response,
-                provider="Qwen",
-                truncated_reasons={"length"},
-            )
-        except RuntimeError:
-            self.last_response_metadata = {
-                "status": "invalid_response",
-                "error": "response did not contain a completion choice",
-            }
-            raise
-        return result
+            options["reasoning_effort"] = self.reasoning_effort
+        return options

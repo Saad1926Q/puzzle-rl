@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 import json
 from typing import Any
 
-from evaluation.protocol import extract_chat_tool_tile, json_safe
+from evaluation.constants import SLIDE_TILE_TOOL
+from evaluation.protocol import (
+    HistoryTurn,
+    build_chat_completion_messages,
+    extract_chat_tool_tile,
+    json_safe,
+)
+from puzzle3.board import Board
 
 
 def validate_reasoning_effort(reasoning_effort: str) -> None:
@@ -43,6 +51,63 @@ def _text_content(content: Any) -> str:
     return ""
 
 
+class ChatCompletionAgent:
+    """Shared one-request-per-state OpenAI-compatible Chat Completions adapter."""
+
+    def __init__(
+        self,
+        *,
+        client: Any,
+        model: str,
+        max_tokens: int,
+        provider: str,
+        truncated_reasons: set[str],
+        request_options: Callable[[], dict[str, Any]],
+    ) -> None:
+        self.client = client
+        self.model = model
+        self.max_tokens = max_tokens
+        self.provider = provider
+        self.truncated_reasons = truncated_reasons
+        self._request_options = request_options
+        self.last_response_metadata: dict[str, Any] = {}
+
+    def next_action(
+        self,
+        board: Board,
+        history: Sequence[HistoryTurn] = (),
+        *,
+        include_reasoning: bool = False,
+    ) -> str:
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": build_chat_completion_messages(
+                board, history, include_reasoning=include_reasoning
+            ),
+            "tools": [SLIDE_TILE_TOOL],
+            "max_tokens": self.max_tokens,
+            **self._request_options(),
+        }
+        try:
+            response = self.client.chat.completions.create(**request)
+        except Exception as exc:
+            self.last_response_metadata = api_error_metadata(exc)
+            raise
+        try:
+            result, self.last_response_metadata = parse_chat_response(
+                response,
+                provider=self.provider,
+                truncated_reasons=self.truncated_reasons,
+            )
+        except RuntimeError:
+            self.last_response_metadata = {
+                "status": "invalid_response",
+                "error": "response did not contain a completion choice",
+            }
+            raise
+        return result
+
+
 def parse_chat_response(
     response: Any,
     *,
@@ -50,7 +115,6 @@ def parse_chat_response(
     truncated_reasons: set[str],
 ) -> tuple[str, dict[str, Any]]:
     """Normalize one OpenAI-compatible Chat Completions response."""
-
     try:
         choice = response.choices[0]
         message = choice.message
