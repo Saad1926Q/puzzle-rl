@@ -637,20 +637,20 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
         ["--provider", "qwen", "--history", "actions"]
     )
     args = runner["build_parser"]().parse_args(["--provider", "qwen"])
-    runner["resolve_provider_args"](args)
+    settings = runner["ProviderSettings"].from_args(args)
 
-    assert args.model == "Qwen/Qwen3.5-0.8B"
-    assert args.base_url == "http://localhost:8000/v1"
+    assert settings.model == "Qwen/Qwen3.5-0.8B"
+    assert settings.base_url == "http://localhost:8000/v1"
     assert xhigh_args.reasoning_effort == "xhigh"
-    assert args.api_key_env is None
-    assert args.thinking is False
+    assert settings.api_key_env is None
+    assert settings.thinking is False
     assert args.history == "reasoning"
     assert history_args.history == "actions"
     crof_args = runner["build_parser"]().parse_args(["--provider", "crof"])
-    runner["resolve_provider_args"](crof_args)
-    assert crof_args.model == "glm-5.3-flash"
-    assert crof_args.base_url == "https://crof.ai/v1"
-    assert crof_args.api_key_env == "CROF_API_KEY"
+    crof_settings = runner["ProviderSettings"].from_args(crof_args)
+    assert crof_settings.model == "glm-5.3-flash"
+    assert crof_settings.base_url == "https://crof.ai/v1"
+    assert crof_settings.api_key_env == "CROF_API_KEY"
 
 
 
@@ -673,15 +673,15 @@ def test_openrouter_cli_requires_model_and_uses_reproducible_defaults() -> None:
             "--openrouter-distillable-only",
         ]
     )
-    runner["resolve_provider_args"](args)
+    settings = runner["ProviderSettings"].from_args(args)
 
-    assert args.base_url == "https://openrouter.ai/api/v1"
-    assert args.api_key_env == "OPENROUTER_API_KEY"
-    assert args.openrouter_allow_fallbacks is False
-    assert args.openrouter_data_collection == "deny"
-    assert args.openrouter_upstream == ["together"]
-    assert args.openrouter_quantization == ["bf16"]
-    assert args.openrouter_relax_parameters is False
+    assert settings.base_url == "https://openrouter.ai/api/v1"
+    assert settings.api_key_env == "OPENROUTER_API_KEY"
+    assert settings.openrouter_allow_fallbacks is False
+    assert settings.openrouter_data_collection == "deny"
+    assert settings.openrouter_upstream == ("together",)
+    assert settings.openrouter_quantizations == ("bf16",)
+    assert settings.openrouter_require_parameters is True
     relaxed_args = parser.parse_args(
         [
             "--provider",
@@ -692,11 +692,11 @@ def test_openrouter_cli_requires_model_and_uses_reproducible_defaults() -> None:
         ]
     )
     assert relaxed_args.openrouter_relax_parameters is True
-    assert args.reasoning_effort is None
+    assert settings.reasoning_effort is None
 
     missing_model = parser.parse_args(["--provider", "openrouter"])
     with pytest.raises(ValueError, match="--model is required"):
-        runner["resolve_provider_args"](missing_model)
+        runner["ProviderSettings"].from_args(missing_model)
 
 
 

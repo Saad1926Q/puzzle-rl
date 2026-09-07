@@ -31,7 +31,7 @@ from evaluation.constants import (
 )
 from evaluation.dataset import load_examples
 from evaluation.evaluator import EvaluationResult, evaluate
-from evaluation.providers import PROVIDERS, create_agent_factory, resolve_provider_args
+from evaluation.providers import PROVIDERS, ProviderSettings, create_agent_factory
 
 
 
@@ -185,7 +185,11 @@ def history_options(history: str) -> tuple[bool, bool]:
 
 
 
-def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, Any]:
+def metadata(
+    args: argparse.Namespace,
+    actual_num_examples: int,
+    settings: ProviderSettings,
+) -> dict[str, Any]:
     result = {
         "dataset": args.dataset,
         "config": args.config,
@@ -195,12 +199,11 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
         "parallelism": args.parallelism,
         "offset": args.offset,
         "max_turns": args.max_turns,
-        "provider": args.provider,
-        "model": args.model,
-        "base_url": args.base_url,
-        "thinking": args.thinking,
-        "reasoning_effort": args.reasoning_effort,
-        "max_tokens": args.max_tokens,
+        "provider": settings.provider,
+        "model": settings.model,
+        "base_url": settings.base_url,
+        "thinking": settings.thinking,
+        "reasoning_effort": settings.reasoning_effort,
         "temperature": args.temperature,
         "top_p": args.top_p,
         "top_k": args.top_k,
@@ -230,8 +233,8 @@ def metadata(args: argparse.Namespace, actual_num_examples: int) -> dict[str, An
 
 def main() -> None:
     args = build_parser().parse_args()
-    resolve_provider_args(args)
-    provider = PROVIDERS[args.provider]
+    settings = ProviderSettings.from_args(args)
+    provider = PROVIDERS[settings.provider]
     keep_history, keep_reasoning = history_options(args.history)
     if args.output is None:
         args.output = Path("eval") / provider.default_output
@@ -242,8 +245,7 @@ def main() -> None:
         limit=args.num_examples,
         offset=args.offset,
     )
-
-    agent_factory = create_agent_factory(args)
+    agent_factory = create_agent_factory(settings, args.dotenv)
 
     result: EvaluationResult = evaluate(
         examples,
@@ -254,7 +256,7 @@ def main() -> None:
         keep_reasoning=keep_reasoning,
         agent_factory=agent_factory,
     )
-    run_metadata = metadata(args, len(examples))
+    run_metadata = metadata(args, len(examples), settings)
     summary_output = {"metadata": run_metadata, "summary": result.summary()}
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
