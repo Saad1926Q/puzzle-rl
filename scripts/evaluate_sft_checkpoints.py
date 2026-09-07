@@ -115,7 +115,10 @@ class LocalCheckpointAgent:
         )
         tile = parse_tile(response)
         if tile is None:
-            match = re.search(r"[\\\"']tile[\\\"']\\s*:\\s*([1-8])", response)
+            match = re.search(r"<parameter=tile>\s*([1-8])\s*</parameter>", response)
+            tile = int(match.group(1)) if match else None
+        if tile is None:
+            match = re.search(r"[\\\"']tile[\\\"']\s*:\s*([1-8])", response)
             tile = int(match.group(1)) if match else None
         self.last_response_metadata = {
             "status": "ok" if tile is not None else "invalid_response",
