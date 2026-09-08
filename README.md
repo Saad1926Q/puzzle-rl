@@ -138,10 +138,11 @@ Authenticate once with `uv run wandb login` before training. The default
 configuration logs training metrics to Weights & Biases; use
 `--report-to none` to disable logging for a local-only run.
 
-The default run trains for 120 optimizer steps and saves checkpoints every
-10 steps. It trains only rows with `metadata.record_type == "decision"` and
-uses completion-only loss; the prompt and environment history are context,
-while the rationale and `slide_tile` call are targets.
+The default run trains for 240 optimizer steps—approximately one full pass over
+the current 3,745-row dataset—and saves checkpoints every 40 steps. It trains
+only rows with `metadata.record_type == "decision"` and uses completion-only
+loss; the prompt and environment history are context, while the rationale and
+`slide_tile` call are targets.
 
 Evaluate saved checkpoints through one vLLM server. Register all adapters when
 the server starts, then use the normal `run_eval_8puzzle.py` interface for each
