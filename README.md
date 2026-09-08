@@ -143,50 +143,69 @@ The default run trains for 120 optimizer steps and saves checkpoints every
 uses completion-only loss; the prompt and environment history are context,
 while the rationale and `slide_tile` call are targets.
 
-Evaluate all saved checkpoints locally on the ten fresh validation puzzles:
+Evaluate saved checkpoints through one vLLM server. Register all adapters when
+the server starts, then use the normal `run_eval_8puzzle.py` interface for each
+checkpoint. This keeps the serving configuration explicit and produces one
+standalone summary and trajectory artifact per model.
+
+For local checkpoint directories:
 
 ```bash
-uv run python scripts/evaluate_sft_checkpoints.py \
-    --checkpoint-root outputs/sft/qwen3.5-4b \
-    --base-model Qwen/Qwen3.5-4B \
-    --num-rollouts 1 \
-    --output eval/sft-checkpoints.json
-```
+CHECKPOINT_ROOT=outputs/sft/qwen3.5-4b
 
-For parallel single-GPU evaluation, use the vLLM backend. Start vLLM once
-with runtime LoRA loading enabled:
-
-```bash
-export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
 vllm serve Qwen/Qwen3.5-4B \
     --enable-lora \
+    --max-loras 6 \
+    --lora-modules \
+        checkpoint-20="$CHECKPOINT_ROOT/checkpoint-20" \
+        checkpoint-40="$CHECKPOINT_ROOT/checkpoint-40" \
+        checkpoint-60="$CHECKPOINT_ROOT/checkpoint-60" \
+        checkpoint-80="$CHECKPOINT_ROOT/checkpoint-80" \
+        checkpoint-100="$CHECKPOINT_ROOT/checkpoint-100" \
+        checkpoint-120="$CHECKPOINT_ROOT/checkpoint-120" \
+    --reasoning-parser qwen3 \
     --max-lora-rank 16 \
-    --max-num-seqs 2 \
-    --max-model-len 4096 \
+    --max-num-seqs 4 \
+    --gpu-memory-utilization 0.85 \
+    --max-model-len 16384 \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --port 8000
 ```
 
-Then pass only the checkpoint root. The evaluator discovers checkpoints in
-numeric order, loads each adapter into vLLM, evaluates its puzzles with
-parallel requests, unloads the adapter, and continues:
+Verify the registered IDs before evaluating:
 
 ```bash
-uv run python scripts/evaluate_sft_checkpoints.py \
-    --backend vllm \
-    --checkpoint-root outputs/sft/qwen3.5-4b \
-    --vllm-base-url http://localhost:8000/v1 \
-    --parallelism 2 \
-    --num-rollouts 1 \
-    --output eval/sft-checkpoints-vllm.json
+curl -s http://localhost:8000/v1/models | jq -r '.data[].id'
 ```
 
-Turns within one puzzle remain sequential; `--parallelism` runs independent
-puzzles concurrently through the single vLLM model.
+Run each checkpoint sequentially through the normal evaluator:
 
-Select the checkpoint using held-out solve rate and reward. Run the final
-`eval` and `exhaustive` benchmarks only after selecting the checkpoint.
+```bash
+for MODEL in checkpoint-20 checkpoint-40 checkpoint-60 checkpoint-80 checkpoint-100 checkpoint-120; do
+    uv run python scripts/run_eval_8puzzle.py \
+        --provider qwen \
+        --model "$MODEL" \
+        --base-url http://localhost:8000/v1 \
+        --dataset saad1926q/8-puzzle \
+        --config eval \
+        --split eval \
+        --num-rollouts 3 \
+        --parallelism 4 \
+        --thinking \
+        --keep-history \
+        --keep-reasoning \
+        --max-tokens 4096 \
+        --temperature 1.0 \
+        --save-trajectories \
+        --output "eval/${MODEL}-eval-4096.json"
+done
+```
+
+Use `--config sft --split validation` for the ten-puzzle held-out validation
+set. Use `--config eval --split eval` only for the general evaluation set.
+Keep checkpoint evaluations sequential; parallelism applies to independent
+puzzles within one model evaluation.
 
 ## Metrics and Trajectories
 
