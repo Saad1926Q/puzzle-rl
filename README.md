@@ -25,8 +25,8 @@ This repository provides:
 - rewards suitable for later RL experiments.
 
 Evaluation includes the previous four completed board/action turns and their
-available reasoning by default. Use `--history actions` to omit reasoning or
-`--history none` to send only the current board.
+available reasoning only when `--history` is passed. Without the flag, the
+model receives only the current board.
 
 ## Action Interface
 
@@ -327,7 +327,7 @@ Useful options include:
 --max-turns N        limit each episode to at most 45 actions
 --no-thinking        disable model reasoning when supported
 --reasoning-effort   choose minimal, low, medium, high, max, or xhigh
---history MODE       use none, actions, or reasoning history (default: reasoning)
+--history            include the previous four turns and their reasoning
 --max-tokens N       set the response token budget
 ```
 

@@ -45,7 +45,7 @@ def test_history_is_bounded_to_four_completed_turns() -> None:
             *,
             include_reasoning: bool,
         ) -> str:
-            assert include_reasoning is False
+            assert include_reasoning is True
             self.received_history.append(history)
             return self.responses.pop(0)
     agent = HistoryAgent(
@@ -68,7 +68,7 @@ def test_history_is_bounded_to_four_completed_turns() -> None:
     assert [len(history) for history in agent.received_history] == [0, 1, 2, 3, 4]
     assert [turn.tile for turn in agent.received_history[-1]] == [7, 4, 1, 2]
 
-def test_history_retains_reasoning_only_when_requested() -> None:
+def test_history_always_retains_reasoning() -> None:
     @dataclass
     class ReasoningAgent:
         calls: int = 0
@@ -84,6 +84,7 @@ def test_history_retains_reasoning_only_when_requested() -> None:
             *,
             include_reasoning: bool,
         ) -> str:
+            assert include_reasoning is True
             self.received_history.append(history)
             self.last_response_metadata = {
                 "reasoning_content": "Move toward goal.",
@@ -100,21 +101,12 @@ def test_history_retains_reasoning_only_when_requested() -> None:
         agent,
         max_turns=2,
         keep_history=True,
-        keep_reasoning=True,
     )
 
     assert agent.received_history[1][0].reasoning == "Move toward goal."
     assert agent.received_history[1][0].reasoning_details == [
         {"type": "reasoning.text", "text": "Move toward goal."}
     ]
-
-def test_reasoning_history_requires_history() -> None:
-    with pytest.raises(ValueError, match="keep_reasoning requires keep_history"):
-        evaluate_episode(
-            example((1, 2, 3, 4, 5, 6, 7, 0, 8)),
-            SequenceAgent(['{"tile": 8}']),
-            keep_reasoning=True,
-        )
 
 def test_evaluation_records_api_error_without_aborting_other_rollouts() -> None:
     class APIErrorAgent:

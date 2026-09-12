@@ -82,7 +82,6 @@ def run_rollout(
         max_turns=config.max_turns,
         rollout_id=rollout_id,
         keep_history=True,
-        keep_reasoning=True,
     )
 
 

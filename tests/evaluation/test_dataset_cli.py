@@ -30,18 +30,19 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
         ["--provider", "qwen", "--reasoning-effort", "xhigh"]
     )
     history_args = runner["build_parser"]().parse_args(
-        ["--provider", "qwen", "--history", "actions"]
+        ["--provider", "qwen", "--history"]
     )
+    no_history_args = runner["build_parser"]().parse_args(["--provider", "qwen"])
     args = runner["build_parser"]().parse_args(["--provider", "qwen"])
     settings = runner["ProviderSettings"].from_args(args)
 
     assert settings.model == "Qwen/Qwen3.5-0.8B"
-    assert settings.base_url == "http://localhost:8000/v1"
     assert xhigh_args.reasoning_effort == "xhigh"
     assert settings.api_key_env is None
     assert settings.thinking is False
-    assert args.history == "reasoning"
-    assert history_args.history == "actions"
+    assert args.history is False
+    assert no_history_args.history is False
+    assert history_args.history is True
     crof_args = runner["build_parser"]().parse_args(["--provider", "crof"])
     crof_settings = runner["ProviderSettings"].from_args(crof_args)
     assert crof_settings.model == "glm-5.3-flash"

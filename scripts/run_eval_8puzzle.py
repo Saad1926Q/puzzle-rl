@@ -154,9 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--history",
-        choices=("none", "actions", "reasoning"),
-        default="reasoning",
-        help="Prior-turn context: none, completed actions, or actions with reasoning",
+        action="store_true",
+        help="Include the previous four turns, including their reasoning",
     )
     parser.add_argument(
         "--output",
@@ -175,10 +174,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-def history_options(history: str) -> tuple[bool, bool]:
-    """Convert the CLI history mode into evaluator options."""
-    return history != "none", history == "reasoning"
-
 
 
 
@@ -187,7 +182,7 @@ def main() -> None:
     args = build_parser().parse_args()
     settings = ProviderSettings.from_args(args)
     provider = PROVIDERS[settings.provider]
-    keep_history, keep_reasoning = history_options(args.history)
+    keep_history = args.history
     if args.output is None:
         args.output = Path("eval") / provider.default_output
     examples = load_examples(
@@ -205,8 +200,6 @@ def main() -> None:
         num_rollouts=args.num_rollouts,
         parallelism=args.parallelism,
         keep_history=keep_history,
-        keep_reasoning=keep_reasoning,
-        agent_factory=agent_factory,
     )
     run_metadata = metadata(args, len(examples), settings)
     trajectory_path = write_evaluation_artifacts(
