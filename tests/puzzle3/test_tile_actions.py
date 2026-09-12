@@ -59,11 +59,18 @@ def test_exact_distance_table_has_expected_reachable_states() -> None:
     assert max(solver_module._DISTANCE_TABLE.values()) == 31
 
 
-def test_regenerated_eval_files_have_valid_tile_action_records(tmp_path) -> None:
+def test_regenerated_eval_files_have_two_records_at_every_depth(tmp_path) -> None:
     import runpy
 
-    generator = runpy.run_path("data/generate_eval_data_3x3.py")
-    records = generator["generate_eval_candidates"](45, random.Random(42))
+    generator = runpy.run_path("data/create_eval_3x3.py")
+    records = generator["generate_eval_candidates"](random.Random(42), set())
+    assert records == generator["generate_eval_candidates"](random.Random(42), set())
+    assert len(records) == 62
+    assert Counter(record["optimal_length"] for record in records) == {
+        depth: 2 for depth in range(1, 32)
+    }
+    assert len({tuple(record["board"]) for record in records}) == len(records)
+
     jsonl_path = tmp_path / "eval.jsonl"
     parquet_path = tmp_path / "eval.parquet"
     generator["write_eval_jsonl"](records, jsonl_path)
@@ -71,11 +78,9 @@ def test_regenerated_eval_files_have_valid_tile_action_records(tmp_path) -> None
 
     for path in (jsonl_path, parquet_path):
         examples = load_examples(dataset=str(path))
-        assert len(examples) == 45
-        assert Counter(example.metadata["bucket"] for example in examples) == {
-            "easy": 15,
-            "medium": 15,
-            "hard": 15,
+        assert len(examples) == 62
+        assert Counter(example.optimal_length for example in examples) == {
+            depth: 2 for depth in range(1, 32)
         }
         for example in examples:
             assert example.metadata["action_interface"] == "tile_id_v1"
@@ -83,20 +88,14 @@ def test_regenerated_eval_files_have_valid_tile_action_records(tmp_path) -> None
             assert len(example.optimal_actions) == example.optimal_length
 
 
-def test_exhaustive_eval_has_requested_unseen_boards() -> None:
+def test_eval_generator_respects_excluded_boards() -> None:
     import runpy
 
-    generator = runpy.run_path("data/create_exhaustive_eval.py")
-    depth_counts = generator["DEPTH_COUNTS"]
-    generate = generator["generate_exhaustive_eval_candidates"]
-    excluded = {
-        (1, 2, 3, 4, 5, 6, 7, 0, 8),
-        (1, 2, 3, 4, 5, 6, 0, 7, 8),
-    }
-    records = generate(random.Random(42), excluded)
+    generator = runpy.run_path("data/create_eval_3x3.py")
+    paths = generator["enumerate_from_goal"]()
+    excluded = {next(board for board, path in paths.items() if len(path) == 10)}
+    records = generator["generate_eval_candidates"](random.Random(42), excluded)
 
-    assert len(records) == 272
-    assert Counter(record["optimal_length"] for record in records) == depth_counts
     assert not ({tuple(record["board"]) for record in records} & excluded)
 
 

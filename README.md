@@ -75,28 +75,28 @@ Training and evaluation use the same deterministic reward calculation. Serialize
 
 ## Evaluation Set
 
-The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 30 fixed puzzles:
-
-- 10 easy puzzles;
-- 10 medium puzzles;
-- 10 hard puzzles.
+The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 62 fixed puzzles: exactly two puzzles at every optimal distance from 1 through 31.
 
 The repository can also generate equivalent local JSONL and Parquet files:
 
 ```bash
-uv run python data/generate_eval_data_3x3.py
+uv run python data/create_eval_3x3.py
 ```
 
-The generator exhaustively searches the solvable state space, groups puzzles by difficulty, and selects reproducible state quantiles within each group.
+The generator exhaustively searches the solvable state space, samples two
+reproducible puzzles at every distance, and excludes boards reserved by the
+local SFT datasets.
+
 
 ## SFT Held-Out Validation
 
-The Hugging Face `sft` configuration uses all 3,745 teacher decision rows in
-its `train` split. Its `validation` split contains ten fresh puzzle starts:
-two puzzles at each exact depth from 6 through 10. These rows have
-`metadata.record_type == "puzzle"` and include verified `optimal_actions` for
-evaluation metadata; the model never receives those actions.
-Use the validation split for checkpoint selection by running complete
+The Hugging Face `sft` configuration publishes the 3,745 teacher decision
+rows in its `train` split. The ten fresh puzzle starts used for checkpoint
+selection are kept locally in
+`data/sft_validation_puzzles_3x3_depths_6_10_10.jsonl` rather than being
+published in the Hugging Face dataset.
+
+Use the local validation file for checkpoint selection by running complete
 autonomous rollouts and comparing solved rate, reward, illegal actions,
 timeouts, and moves:
 
@@ -104,9 +104,9 @@ timeouts, and moves:
 uv run python scripts/run_eval_8puzzle.py \
     --provider openrouter \
     --model your-sft-checkpoint \
-    --dataset saad1926q/8-puzzle \
+    --dataset data/sft_validation_puzzles_3x3_depths_6_10_10.jsonl \
     --config sft \
-    --split validation \
+    --split train \
     --num-rollouts 1 \
     --parallelism 2 \
     --save-trajectories \
@@ -203,8 +203,9 @@ for MODEL in checkpoint-20 checkpoint-40 checkpoint-60 checkpoint-80 checkpoint-
 done
 ```
 
-Use `--config sft --split validation` for the ten-puzzle held-out validation
-set. Use `--config eval --split eval` only for the general evaluation set.
+Use `data/sft_validation_puzzles_3x3_depths_6_10_10.jsonl` for the ten-puzzle
+held-out validation set. Use `--config eval --split eval` only for the general
+evaluation set.
 Keep checkpoint evaluations sequential; parallelism applies to independent
 puzzles within one model evaluation.
 
@@ -246,7 +247,7 @@ Run an evaluation:
 uv run python scripts/run_eval_8puzzle.py \
     --provider glm \
     --model glm-4.7 \
-    --dataset data/eval_puzzles_3x3_45.jsonl \
+    --dataset data/eval_puzzles_62.jsonl \
     --num-rollouts 3 \
     --parallelism 3 \
     --thinking \
@@ -294,7 +295,7 @@ uv run python scripts/run_eval_8puzzle.py \
     --provider qwen \
     --model Qwen/Qwen3.5-4B \
     --base-url http://localhost:8000/v1 \
-    --dataset data/eval_puzzles_3x3_45.jsonl \
+    --dataset data/eval_puzzles_62.jsonl \
     --num-rollouts 8 \
     --parallelism 8 \
     --max-tokens 256 \
@@ -341,7 +342,7 @@ upstream provider for reproducible finalist comparisons, and save trajectories:
 uv run python scripts/run_eval_8puzzle.py \
     --provider openrouter \
     --model qwen/qwen3.5-27b \
-    --dataset data/eval_puzzles_3x3_45.jsonl \
+    --dataset data/eval_puzzles_62.jsonl \
     --num-rollouts 4 \
     --parallelism 4 \
     --thinking \
