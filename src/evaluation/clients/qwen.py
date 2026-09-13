@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from evaluation.board_representations import BoardRepresentation
 from evaluation.clients.common import ChatCompletionAgent
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
@@ -35,6 +36,7 @@ class QwenAgent(ChatCompletionAgent):
         presence_penalty: float = DEFAULT_QWEN_PRESENCE_PENALTY,
         repetition_penalty: float = DEFAULT_QWEN_REPETITION_PENALTY,
         client: Any | None = None,
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         if temperature < 0:
             raise ValueError("temperature must be non-negative")
@@ -65,6 +67,7 @@ class QwenAgent(ChatCompletionAgent):
             provider="Qwen",
             truncated_reasons={"length"},
             request_options=self._request_options,
+            board_representation=board_representation,
         )
 
     def _request_options(self) -> dict[str, Any]:

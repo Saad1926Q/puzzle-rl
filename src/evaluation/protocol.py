@@ -10,13 +10,13 @@ from typing import Any, Protocol, Sequence
 
 from dotenv import load_dotenv
 
+from evaluation.board_representations import BoardRepresentation, render_board
 from evaluation.constants import (
     DEFAULT_API_KEY_ENV,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_WITH_HISTORY,
 )
 from puzzle3.board import Board
-from puzzle3.render import render
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,12 @@ class PuzzleAgent(Protocol):
         """Return one canonical tile-selection response for the current board."""
 
 
-def _board_prompt(board: Board, *, after_action: bool = False) -> str:
+def _board_prompt(
+    board: Board,
+    *,
+    representation: BoardRepresentation = "grid",
+    after_action: bool = False,
+) -> str:
     heading = (
         "Board after that action (0 is the blank):"
         if after_action
@@ -51,7 +56,7 @@ def _board_prompt(board: Board, *, after_action: bool = False) -> str:
     return "\n".join(
         (
             heading,
-            render(board),
+            render_board(board, representation),
             "\nChoose the single adjacent numbered tile to slide into the blank now.",
         )
     )
@@ -63,9 +68,9 @@ def build_chat_completion_messages(
     *,
     include_reasoning: bool = False,
     system_prompt: str | None = None,
+    board_representation: BoardRepresentation = "grid",
 ) -> list[dict[str, Any]]:
     """Build Chat Completions messages for one puzzle state."""
-
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -74,10 +79,23 @@ def build_chat_completion_messages(
         }
     ]
     if not history:
-        messages.append({"role": "user", "content": _board_prompt(board)})
+        messages.append(
+            {
+                "role": "user",
+                "content": _board_prompt(
+                    board, representation=board_representation
+                ),
+            }
+        )
         return messages
-
-    messages.append({"role": "user", "content": _board_prompt(history[0].board)})
+    messages.append(
+        {
+            "role": "user",
+            "content": _board_prompt(
+                history[0].board, representation=board_representation
+            ),
+        }
+    )
     for index, turn in enumerate(history):
         call_id = f"history_slide_{index}"
         messages.append(
@@ -101,7 +119,11 @@ def build_chat_completion_messages(
             {
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": _board_prompt(next_board, after_action=True),
+                "content": _board_prompt(
+                    next_board,
+                    representation=board_representation,
+                    after_action=True,
+                ),
             }
         )
     return messages
@@ -113,18 +135,18 @@ def build_openrouter_chat_completion_messages(
     *,
     include_reasoning: bool = False,
     system_prompt: str | None = None,
+    board_representation: BoardRepresentation = "grid",
 ) -> list[dict[str, Any]]:
     """Build OpenRouter messages while preserving native reasoning fields."""
-
     messages = build_chat_completion_messages(
         board,
         history,
         include_reasoning=include_reasoning,
         system_prompt=system_prompt,
+        board_representation=board_representation,
     )
     if not include_reasoning:
         return messages
-
     assistant_messages = (
         message for message in messages if message["role"] == "assistant"
     )
@@ -142,6 +164,7 @@ def build_openai_responses_input(
     history: Sequence[HistoryTurn] = (),
     *,
     include_reasoning: bool = False,
+    board_representation: BoardRepresentation = "grid",
 ) -> list[dict[str, Any]]:
     """Build the OpenAI Responses API wire format for the same puzzle context.
 
@@ -149,13 +172,19 @@ def build_openai_responses_input(
     ``function_call`` and ``function_call_output`` items. Both builders accept
     the same logical board/history inputs but serialize them for different APIs.
     """
-
     if not history:
-        return build_chat_completion_messages(board)
-
+        return build_chat_completion_messages(
+            board,
+            board_representation=board_representation,
+        )
     items: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT_WITH_HISTORY},
-        {"role": "user", "content": _board_prompt(history[0].board)},
+        {
+            "role": "user",
+            "content": _board_prompt(
+                history[0].board, representation=board_representation
+            ),
+        },
     ]
     for index, turn in enumerate(history):
         call_id = f"history_slide_{index}"
@@ -174,10 +203,16 @@ def build_openai_responses_input(
             {
                 "type": "function_call_output",
                 "call_id": call_id,
-                "output": _board_prompt(next_board, after_action=True),
+                "output": _board_prompt(
+                    next_board,
+                    representation=board_representation,
+                    after_action=True,
+                ),
             }
         )
     return items
+
+
 
 
 def _valid_tile(value: Any) -> int | None:

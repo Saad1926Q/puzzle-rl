@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 import json
 from typing import Any
 
+from evaluation.board_representations import BoardRepresentation
 from evaluation.constants import SLIDE_TILE_TOOL
 from evaluation.protocol import (
     HistoryTurn,
@@ -63,6 +64,7 @@ class ChatCompletionAgent:
         provider: str,
         truncated_reasons: set[str],
         request_options: Callable[[], dict[str, Any]],
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         self.client = client
         self.model = model
@@ -70,6 +72,7 @@ class ChatCompletionAgent:
         self.provider = provider
         self.truncated_reasons = truncated_reasons
         self._request_options = request_options
+        self.board_representation = board_representation
         self.last_response_metadata: dict[str, Any] = {}
 
     def next_action(
@@ -82,7 +85,10 @@ class ChatCompletionAgent:
         request: dict[str, Any] = {
             "model": self.model,
             "messages": build_chat_completion_messages(
-                board, history, include_reasoning=include_reasoning
+                board,
+                history,
+                include_reasoning=include_reasoning,
+                board_representation=self.board_representation,
             ),
             "tools": [SLIDE_TILE_TOOL],
             "max_tokens": self.max_tokens,

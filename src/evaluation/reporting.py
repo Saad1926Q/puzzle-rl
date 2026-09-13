@@ -45,6 +45,7 @@ def metadata(
         "presence_penalty": args.presence_penalty,
         "repetition_penalty": args.repetition_penalty,
         "history": args.history,
+        "board_representation": settings.board_representation,
         "save_trajectories": args.save_trajectories,
         "action_interface": ACTION_INTERFACE,
         "reward_scheme": REWARD_SCHEME,

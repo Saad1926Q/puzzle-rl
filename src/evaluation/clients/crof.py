@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from evaluation.board_representations import BoardRepresentation
 from evaluation.clients.common import ChatCompletionAgent, validate_reasoning_effort
 from evaluation.constants import (
     DEFAULT_CROF_BASE_URL,
@@ -27,6 +28,7 @@ class CrofAgent(ChatCompletionAgent):
         reasoning_effort: str = DEFAULT_REASONING_EFFORT,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         client: Any | None = None,
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         if client is None:
             from openai import OpenAI
@@ -42,6 +44,7 @@ class CrofAgent(ChatCompletionAgent):
             provider="CrofAI",
             truncated_reasons={"length"},
             request_options=self._request_options,
+            board_representation=board_representation,
         )
 
     def _request_options(self) -> dict[str, Any]:

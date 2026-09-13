@@ -25,6 +25,20 @@ def test_messages_contain_current_board_but_no_history() -> None:
     assert "_" not in messages[1]["content"]
     assert "1 2 3 / 4 5 6 / 7 8 0" in messages[0]["content"]
     assert "history" not in messages[1]["content"].lower()
+def test_messages_use_selected_representation_for_current_and_history_boards() -> None:
+    history = (
+        HistoryTurn((1, 2, 3, 4, 5, 6, 0, 7, 8), tile=7),
+    )
+
+    messages = build_chat_completion_messages(
+        GOAL,
+        history,
+        board_representation="coordinates",
+    )
+    assert "R1C1=1, R1C2=2, R1C3=3" in messages[1]["content"]
+    assert "R3C1=0, R3C2=7, R3C3=8" in messages[1]["content"]
+    assert "R3C1=7, R3C2=8, R3C3=0" in messages[3]["content"]
+    assert "1 2 3" not in messages[1]["content"]
 
 def test_messages_preserve_tool_protocol_and_optional_reasoning() -> None:
     history = (

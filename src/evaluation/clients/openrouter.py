@@ -14,6 +14,7 @@ from evaluation.clients.openrouter_transport import (
     is_retryable_transport_error,
     openrouter_extra_body,
 )
+from evaluation.board_representations import BoardRepresentation
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_OPENROUTER_BASE_URL,
@@ -52,6 +53,7 @@ class OpenRouterAgent:
         retry_delay: float = 1.0,
         system_prompt: str | None = None,
         client: Any | None = None,
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         if client is None:
             client = create_openrouter_client(
@@ -86,6 +88,7 @@ class OpenRouterAgent:
         self.provider_retries = provider_retries
         self.retry_delay = retry_delay
         self.system_prompt = system_prompt
+        self.board_representation = board_representation
         self.last_response_metadata: dict[str, Any] = {}
 
     def next_action(
@@ -102,6 +105,7 @@ class OpenRouterAgent:
                 history,
                 include_reasoning=include_reasoning,
                 system_prompt=self.system_prompt,
+                board_representation=self.board_representation,
             ),
             "tools": [SLIDE_TILE_TOOL],
             "tool_choice": "auto",

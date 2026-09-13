@@ -10,6 +10,7 @@ from evaluation.clients.common import (
     empty_reasoning_metadata,
     validate_reasoning_effort,
 )
+from evaluation.board_representations import BoardRepresentation
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_OPENAI_BASE_URL,
@@ -39,6 +40,7 @@ class OpenAIAgent:
         reasoning_effort: str = DEFAULT_REASONING_EFFORT,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         client: Any | None = None,
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         if client is None:
             from openai import OpenAI
@@ -50,6 +52,7 @@ class OpenAIAgent:
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.max_tokens = max_tokens
+        self.board_representation = board_representation
         self.last_response_metadata: dict[str, Any] = {}
 
     def next_action(
@@ -69,7 +72,10 @@ class OpenAIAgent:
         request: dict[str, Any] = {
             "model": self.model,
             "input": build_openai_responses_input(
-                board, history, include_reasoning=include_reasoning
+                board,
+                history,
+                include_reasoning=include_reasoning,
+                board_representation=self.board_representation,
             ),
             "tools": [tool],
             "tool_choice": {"type": "function", "name": "slide_tile"},

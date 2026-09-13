@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from evaluation.board_representations import BoardRepresentation
 from evaluation.clients.common import ChatCompletionAgent
 from evaluation.constants import (
     DEFAULT_GLM_BASE_URL,
@@ -26,6 +27,7 @@ class GLMAgent(ChatCompletionAgent):
         reasoning_effort: str = "medium",
         max_tokens: int = DEFAULT_MAX_TOKENS,
         client: Any | None = None,
+        board_representation: BoardRepresentation = "grid",
     ) -> None:
         if client is None:
             from openai import OpenAI
@@ -42,6 +44,7 @@ class GLMAgent(ChatCompletionAgent):
             provider="GLM",
             truncated_reasons={"length", "model_context_window_exceeded"},
             request_options=self._request_options,
+            board_representation=board_representation,
         )
 
     def _request_options(self) -> dict[str, Any]:

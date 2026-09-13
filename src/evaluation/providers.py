@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from evaluation.board_representations import BoardRepresentation
 from evaluation.clients.crof import CrofAgent
 from evaluation.clients.deepseek import DeepSeekAgent
 from evaluation.clients.glm import GLMAgent
@@ -125,6 +126,7 @@ class ProviderSettings:
     openrouter_quantizations: tuple[str, ...]
     openrouter_data_collection: str
     openrouter_distillable_only: bool
+    board_representation: BoardRepresentation
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ProviderSettings:
@@ -156,9 +158,8 @@ class ProviderSettings:
             openrouter_quantizations=tuple(args.openrouter_quantization),
             openrouter_data_collection=args.openrouter_data_collection,
             openrouter_distillable_only=args.openrouter_distillable_only,
+            board_representation=args.board_representation,
         )
-
-
 def create_agent_factory(
     settings: ProviderSettings, dotenv_path: Path
 ) -> Callable[[], PuzzleAgent]:
@@ -181,6 +182,7 @@ def create_agent_factory(
                 "thinking": settings.thinking,
                 "reasoning_effort": settings.reasoning_effort,
                 "max_tokens": settings.max_tokens,
+                "board_representation": settings.board_representation,
             }
             if settings.provider == "qwen":
                 agent_kwargs.update(

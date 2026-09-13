@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from evaluation.board_representations import BOARD_REPRESENTATIONS
 from evaluation.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
@@ -158,6 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include the previous four turns, including their reasoning",
     )
     parser.add_argument(
+        "--board-representation",
+        choices=BOARD_REPRESENTATIONS,
+        default="grid",
+        help="Board serialization used in model prompts (default: grid)",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -200,6 +207,7 @@ def main() -> None:
         num_rollouts=args.num_rollouts,
         parallelism=args.parallelism,
         keep_history=keep_history,
+        agent_factory=agent_factory,
     )
     run_metadata = metadata(args, len(examples), settings)
     trajectory_path = write_evaluation_artifacts(

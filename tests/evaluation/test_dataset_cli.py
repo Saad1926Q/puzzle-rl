@@ -37,17 +37,65 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     settings = runner["ProviderSettings"].from_args(args)
 
     assert settings.model == "Qwen/Qwen3.5-0.8B"
+    assert settings.board_representation == "grid"
     assert xhigh_args.reasoning_effort == "xhigh"
     assert settings.api_key_env is None
     assert settings.thinking is False
     assert args.history is False
     assert no_history_args.history is False
     assert history_args.history is True
+    custom_args = runner["build_parser"]().parse_args(
+        ["--provider", "qwen", "--board-representation", "markdown"]
+    )
+    assert runner["ProviderSettings"].from_args(custom_args).board_representation == (
+        "markdown"
+    )
     crof_args = runner["build_parser"]().parse_args(["--provider", "crof"])
     crof_settings = runner["ProviderSettings"].from_args(crof_args)
     assert crof_settings.model == "glm-5.3-flash"
     assert crof_settings.base_url == "https://crof.ai/v1"
     assert crof_settings.api_key_env == "CROF_API_KEY"
+
+def test_cli_passes_agent_factory_to_evaluator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import runpy
+    import sys
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    captured: dict[str, object] = {}
+    agent_factory = object()
+
+    class Result:
+        def summary(self) -> dict[str, object]:
+            return {}
+
+    def fake_evaluate(*args, **kwargs):
+        captured.update(kwargs)
+        return Result()
+
+    globals_ = runner["main"].__globals__
+    globals_["load_examples"] = lambda **kwargs: []
+    globals_["create_agent_factory"] = lambda settings, dotenv: agent_factory
+    globals_["evaluate"] = fake_evaluate
+    globals_["metadata"] = lambda *args: {}
+    globals_["write_evaluation_artifacts"] = lambda *args, **kwargs: None
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval_8puzzle.py",
+            "--provider",
+            "qwen",
+            "--output",
+            str(tmp_path / "result.json"),
+        ],
+    )
+
+    runner["main"]()
+
+    assert captured["agent_factory"] is agent_factory
+
 
 def test_reporting_preserves_summary_and_trajectory_artifact_schemas(tmp_path) -> None:
     import runpy
