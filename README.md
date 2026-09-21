@@ -69,7 +69,7 @@ The remaining outcomes are handled as follows:
 | Illegal action | `-1.0` |
 | Malformed response | `-1.0` |
 | Truncated response | `-1.0` |
-| Timeout | accumulated progress reward `- 0.25` |
+| Timeout | accumulated progress reward |
 
 Training and evaluation use the same deterministic reward calculation. Serialized steps record the total reward, progress reward, and terminal reward separately.
 

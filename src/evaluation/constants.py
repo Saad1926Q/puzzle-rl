@@ -67,12 +67,11 @@ SLIDE_TILE_TOOL = {
 SOLVED_BASE_REWARD = 0.8
 SOLVED_EFFICIENCY_WEIGHT = 0.2
 ILLEGAL_OR_MALFORMED_REWARD = -1.0
-TIMEOUT_REWARD = -0.25
 
 # Reward legal transitions according to their change in exact solution distance.
 DISTANCE_PROGRESS_WEIGHT = 0.25
 MAX_PUZZLE_DISTANCE = 31
-REWARD_SCHEME = "exact_distance_progress_v1"
+REWARD_SCHEME = "exact_distance_progress_v2"
 ACTION_INTERFACE = "tile_id_v1"
 
 MAX_TURNS = 45

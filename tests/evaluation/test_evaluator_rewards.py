@@ -266,13 +266,13 @@ def test_num_rollouts_must_be_positive() -> None:
     with pytest.raises(ValueError, match="num_rollouts must be positive"):
         evaluate([task], SequenceAgent(['{"tile": 8}']), num_rollouts=0)
 
-def test_valid_unsolved_trajectory_at_limit_gets_progress_and_timeout_penalty() -> None:
-    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+def test_valid_unsolved_trajectory_at_limit_keeps_progress_reward() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 0, 7, 8))
     result = evaluate_episode(task, SequenceAgent(['{"tile": 7}']), max_turns=1)
     assert result.outcome == "timeout"
-    assert result.reward == pytest.approx(-0.25 - 0.25 / 31)
-    assert result.steps[0].progress_reward == pytest.approx(-0.25 / 31)
-    assert result.steps[0].terminal_reward == pytest.approx(-0.25)
+    assert result.reward == pytest.approx(0.25 / 31)
+    assert result.steps[0].progress_reward == pytest.approx(0.25 / 31)
+    assert result.steps[0].terminal_reward == 0.0
     assert result.moves_taken == 1
 
 def test_turn_limit_cannot_exceed_45() -> None:

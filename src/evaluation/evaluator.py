@@ -11,7 +11,6 @@ from evaluation.constants import (
     DEFAULT_MAX_TURNS,
     ILLEGAL_OR_MALFORMED_REWARD,
     MAX_TURNS,
-    TIMEOUT_REWARD,
 )
 from evaluation.dataset import PuzzleExample
 from evaluation.protocol import HistoryTurn, PuzzleAgent, parse_tile
@@ -209,10 +208,6 @@ def evaluate_episode(
                 rollout_id=rollout_id,
             )
 
-    # Attach the timeout penalty to the final valid transition. This keeps the
-    # serialized per-step rewards aligned with the aggregate episode return.
-    steps[-1].reward += TIMEOUT_REWARD
-    steps[-1].terminal_reward += TIMEOUT_REWARD
     return EpisodeResult(
         example=example,
         outcome="timeout",
