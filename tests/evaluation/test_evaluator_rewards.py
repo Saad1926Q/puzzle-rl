@@ -148,20 +148,33 @@ def test_distance_progress_rewards_progress_and_penalizes_backtracking() -> None
     farther = (1, 2, 3, 4, 5, 6, 0, 7, 8)
     closer = distance_progress_reward(one_move, GOAL)
     farther_reward = distance_progress_reward(one_move, farther)
-    assert closer == pytest.approx(0.25 / 31)
-    assert farther_reward == pytest.approx(-0.25 / 31)
+    assert closer == pytest.approx(0.5 / 31)
+    assert farther_reward == pytest.approx(-0.5 / 31)
     assert closer + farther_reward == pytest.approx(0.0)
 
-def test_solved_episode_includes_terminal_and_progress_rewards() -> None:
+def test_solved_episode_uses_only_terminal_efficiency_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
     result = evaluate_episode(task, SequenceAgent(['{"tile": 8}']))
     assert result.outcome == "solved"
-    assert result.reward == pytest.approx(1.0 + 0.25 / 31)
+    assert result.reward == pytest.approx(1.0)
+    assert result.steps[0].reward == pytest.approx(1.0)
     assert result.steps[0].terminal_reward == pytest.approx(1.0)
-    assert result.steps[0].progress_reward == pytest.approx(0.25 / 31)
+    assert result.steps[0].progress_reward == pytest.approx(0.5 / 31)
     assert result.steps[0].legal_tiles == (5, 7, 8)
     assert result.steps[0].tile == 8
     assert result.final_board == (1, 2, 3, 4, 5, 6, 7, 8, 0)
+
+def test_solved_episode_discards_prior_progress_from_total_reward() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 0, 7, 8), optimal_length=2)
+    result = evaluate_episode(
+        task, SequenceAgent(['{"tile": 7}', '{"tile": 8}'])
+    )
+    assert result.reward == pytest.approx(1.0)
+    assert [step.reward for step in result.steps] == [0.0, 1.0]
+    assert [step.progress_reward for step in result.steps] == pytest.approx(
+        [0.5 / 31, 0.5 / 31]
+    )
+
 
 def test_serialized_steps_contain_no_directional_move_field() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
@@ -178,6 +191,17 @@ def test_illegal_move_ends_immediately_with_negative_reward() -> None:
     assert result.steps[0].legal_tiles == (5, 7, 8)
     assert result.steps[0].tile == 1
     assert len(result.steps) == 1
+
+def test_illegal_move_discards_prior_progress_from_total_reward() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 0, 7, 8), optimal_length=2)
+    result = evaluate_episode(
+        task, SequenceAgent(['{"tile": 7}', '{"tile": 1}'])
+    )
+    assert result.outcome == "illegal"
+    assert result.reward == -1.0
+    assert [step.reward for step in result.steps] == [0.0, -1.0]
+    assert result.steps[0].progress_reward == pytest.approx(0.5 / 31)
+
 
 def test_malformed_response_ends_immediately_with_negative_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
@@ -270,8 +294,8 @@ def test_valid_unsolved_trajectory_at_limit_keeps_progress_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 0, 7, 8))
     result = evaluate_episode(task, SequenceAgent(['{"tile": 7}']), max_turns=1)
     assert result.outcome == "timeout"
-    assert result.reward == pytest.approx(0.25 / 31)
-    assert result.steps[0].progress_reward == pytest.approx(0.25 / 31)
+    assert result.reward == pytest.approx(0.5 / 31)
+    assert result.steps[0].progress_reward == pytest.approx(0.5 / 31)
     assert result.steps[0].terminal_reward == 0.0
     assert result.moves_taken == 1
 

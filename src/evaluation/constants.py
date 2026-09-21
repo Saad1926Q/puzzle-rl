@@ -69,9 +69,9 @@ SOLVED_EFFICIENCY_WEIGHT = 0.2
 ILLEGAL_OR_MALFORMED_REWARD = -1.0
 
 # Reward legal transitions according to their change in exact solution distance.
-DISTANCE_PROGRESS_WEIGHT = 0.25
+DISTANCE_PROGRESS_WEIGHT = 0.5
 MAX_PUZZLE_DISTANCE = 31
-REWARD_SCHEME = "exact_distance_progress_v2"
+REWARD_SCHEME = "exact_distance_progress_v3"
 ACTION_INTERFACE = "tile_id_v1"
 
 MAX_TURNS = 45

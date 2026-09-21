@@ -25,6 +25,13 @@ from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_ti
 
 
 
+def _discard_progress_rewards(steps: list[StepResult]) -> None:
+    """Keep progress diagnostics while removing them from the episode return."""
+
+    for step in steps:
+        step.reward = 0.0
+
+
 def _failed_episode(
     *,
     example: PuzzleExample,
@@ -39,6 +46,8 @@ def _failed_episode(
     steps: list[StepResult],
     terminal_reward: float = ILLEGAL_OR_MALFORMED_REWARD,
 ) -> EpisodeResult:
+    if terminal_reward == ILLEGAL_OR_MALFORMED_REWARD:
+        _discard_progress_rewards(steps)
     steps.append(
         StepResult(
             turn=turn,
@@ -72,12 +81,11 @@ def evaluate_episode(
     rollout_id: int = 0,
     keep_history: bool = False,
 ) -> EpisodeResult:
-    """Run one puzzle with environment-authoritative distance-progress scoring.
+    """Run one puzzle with environment-authoritative outcome scoring.
 
-    Invalid responses receive only the terminal penalty because they do not produce
-    a valid successor state. Every valid move is rewarded for exact-distance progress;
-    solving and timeout rewards are attached to the terminal transition so that the
-    per-step rewards sum exactly to the episode return.
+    Timeouts retain accumulated exact-distance progress. Solved episodes receive
+    only the bounded efficiency reward, while invalid responses receive only their
+    terminal penalty. Per-step progress remains available as a diagnostic.
     """
 
     if not 1 <= max_turns <= MAX_TURNS:
@@ -165,6 +173,8 @@ def evaluate_episode(
         solved = is_solved(next_board)
         progress_reward = distance_progress_reward(board, next_board)
         terminal_reward = solved_reward(example.optimal_length, turn) if solved else 0.0
+        if solved:
+            _discard_progress_rewards(steps)
         steps.append(
             StepResult(
                 turn=turn,
@@ -175,7 +185,7 @@ def evaluate_episode(
                 next_board=next_board,
                 status="solved" if solved else "valid",
                 response_metadata=response_metadata,
-                reward=progress_reward + terminal_reward,
+                reward=terminal_reward if solved else progress_reward,
                 progress_reward=progress_reward,
                 terminal_reward=terminal_reward,
             )

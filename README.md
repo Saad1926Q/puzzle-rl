@@ -51,12 +51,12 @@ The selected tile must be numbered `1` through `8` and adjacent to the blank (`0
 Let `D(s)` be the exact number of moves required to solve board state `s`. Every valid transition receives a small reward for reducing that distance:
 
 ```text
-progress reward = 0.25 × (D_before - D_after) / 31
+progress reward = 0.5 × (D_before - D_after) / 31
 ```
 
 Moving closer is positive, moving farther away is negative, and preserving the same distance gives zero.
 
-A solved episode also receives:
+A solved episode instead receives only:
 
 ```text
 0.8 + 0.2 × min(optimal_length / moves_taken, 1)
