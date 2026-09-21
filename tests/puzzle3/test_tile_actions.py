@@ -59,15 +59,15 @@ def test_exact_distance_table_has_expected_reachable_states() -> None:
     assert max(solver_module._DISTANCE_TABLE.values()) == 31
 
 
-def test_regenerated_eval_files_have_two_records_at_every_depth(tmp_path) -> None:
+def test_regenerated_eval_files_have_one_record_at_every_depth(tmp_path) -> None:
     import runpy
 
     generator = runpy.run_path("data/create_eval_3x3.py")
     records = generator["generate_eval_candidates"](random.Random(42), set())
     assert records == generator["generate_eval_candidates"](random.Random(42), set())
-    assert len(records) == 62
+    assert len(records) == 31
     assert Counter(record["optimal_length"] for record in records) == {
-        depth: 2 for depth in range(1, 32)
+        depth: 1 for depth in range(1, 32)
     }
     assert len({tuple(record["board"]) for record in records}) == len(records)
 
@@ -78,9 +78,9 @@ def test_regenerated_eval_files_have_two_records_at_every_depth(tmp_path) -> Non
 
     for path in (jsonl_path, parquet_path):
         examples = load_examples(dataset=str(path))
-        assert len(examples) == 62
+        assert len(examples) == 31
         assert Counter(example.optimal_length for example in examples) == {
-            depth: 2 for depth in range(1, 32)
+            depth: 1 for depth in range(1, 32)
         }
         for example in examples:
             assert example.metadata["action_interface"] == "tile_id_v1"

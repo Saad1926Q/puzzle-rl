@@ -22,7 +22,7 @@ DEPTHS = tuple(range(6, 11))
 TARGET_TOTAL = 10
 TARGET_PER_DEPTH = 2
 DEFAULT_EXCLUSIONS = (
-    Path("data/eval_puzzles_62.jsonl"),
+    Path("data/eval_puzzles_31.jsonl"),
     Path("data/sft_source_3x3_depths_10_19_200.jsonl"),
     Path("data/sft_source_3x3_depths_12_16_200.jsonl"),
     Path("data/sft_source_3x3_depths_12_16_1000.jsonl"),

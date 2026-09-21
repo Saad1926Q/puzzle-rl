@@ -1,4 +1,4 @@
-"""Generate the fixed 62-puzzle 8-puzzle evaluation dataset."""
+"""Generate the fixed 31-puzzle 8-puzzle evaluation dataset."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from evaluation.generation import (
 from puzzle3.board import Board, GOAL, adjacent_tiles, slide_tile
 
 DEPTHS = tuple(range(1, 32))
-PUZZLES_PER_DEPTH = 2
+PUZZLES_PER_DEPTH = 1
 EXPECTED_REACHABLE_STATES = 181_440
 EXPECTED_MAX_DEPTH = 31
 EXPECTED_RECORDS = len(DEPTHS) * PUZZLES_PER_DEPTH
@@ -63,7 +63,7 @@ def generate_eval_candidates(
     rng: random.Random,
     excluded_boards: set[Board] | None = None,
 ) -> list[dict[str, Any]]:
-    """Sample two unseen boards at every exact distance from the goal."""
+    """Sample one unseen board at every exact distance from the goal."""
 
     excluded_boards = excluded_boards or set()
     paths = enumerate_from_goal()
@@ -135,7 +135,7 @@ def validate_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate the fixed 62-puzzle 3x3 / 8-puzzle eval set."
+        description="Generate the fixed 31-puzzle 3x3 / 8-puzzle eval set."
     )
     parser.add_argument(
         "--exclude-jsonl",
@@ -145,12 +145,12 @@ def main() -> None:
         help="Datasets whose boards must remain out of the evaluation set.",
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("data/eval_puzzles_62.jsonl")
+        "--output", type=Path, default=Path("data/eval_puzzles_31.jsonl")
     )
     parser.add_argument(
         "--parquet-output",
         type=Path,
-        default=Path("data/eval_puzzles_62.parquet"),
+        default=Path("data/eval_puzzles_31.parquet"),
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()

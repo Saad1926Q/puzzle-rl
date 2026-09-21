@@ -75,7 +75,7 @@ Training and evaluation use the same deterministic reward calculation. Serialize
 
 ## Evaluation Set
 
-The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 62 fixed puzzles: exactly two puzzles at every optimal distance from 1 through 31.
+The default evaluation set is [`saad1926q/8-puzzle`](https://huggingface.co/datasets/saad1926q/8-puzzle). Its `eval` split contains 31 fixed puzzles: exactly one puzzle at every optimal distance from 1 through 31.
 
 The repository can also generate equivalent local JSONL and Parquet files:
 
@@ -83,9 +83,10 @@ The repository can also generate equivalent local JSONL and Parquet files:
 uv run python data/create_eval_3x3.py
 ```
 
-The generator exhaustively searches the solvable state space, samples two
-reproducible puzzles at every distance, and excludes boards reserved by the
-local SFT datasets.
+The generator exhaustively searches the solvable state space, samples one
+reproducible puzzle at every distance, and excludes boards reserved by the
+current and archived local datasets.
+
 
 
 ## SFT Held-Out Validation
@@ -247,7 +248,7 @@ Run an evaluation:
 uv run python scripts/run_eval_8puzzle.py \
     --provider glm \
     --model glm-4.7 \
-    --dataset data/eval_puzzles_62.jsonl \
+    --dataset data/eval_puzzles_31.jsonl \
     --num-rollouts 3 \
     --parallelism 3 \
     --thinking \
@@ -295,7 +296,7 @@ uv run python scripts/run_eval_8puzzle.py \
     --provider qwen \
     --model Qwen/Qwen3.5-4B \
     --base-url http://localhost:8000/v1 \
-    --dataset data/eval_puzzles_62.jsonl \
+    --dataset data/eval_puzzles_31.jsonl \
     --num-rollouts 8 \
     --parallelism 8 \
     --max-tokens 256 \
@@ -342,7 +343,7 @@ upstream provider for reproducible finalist comparisons, and save trajectories:
 uv run python scripts/run_eval_8puzzle.py \
     --provider openrouter \
     --model qwen/qwen3.5-27b \
-    --dataset data/eval_puzzles_62.jsonl \
+    --dataset data/eval_puzzles_31.jsonl \
     --num-rollouts 4 \
     --parallelism 4 \
     --thinking \

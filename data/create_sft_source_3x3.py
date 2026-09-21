@@ -21,7 +21,7 @@ DEPTHS = tuple(range(10, 20))
 TARGET_PER_DEPTH = 20
 EXPECTED_RECORDS = len(DEPTHS) * TARGET_PER_DEPTH
 DEFAULT_EXCLUSIONS = (
-    Path("data/eval_puzzles_62.jsonl"),
+    Path("data/eval_puzzles_31.jsonl"),
 )
 
 
