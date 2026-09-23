@@ -21,6 +21,7 @@ from evaluation.rewards import (
     solved_reward,
 )
 from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_tile
+from puzzle3.history import LastTurns
 
 
 
@@ -94,6 +95,7 @@ def evaluate_episode(
     board = example.board
     history: list[HistoryTurn] = []
     steps: list[StepResult] = []
+    history_policy = LastTurns()
     if is_solved(board):
         return EpisodeResult(
             example=example,
@@ -111,7 +113,7 @@ def evaluate_episode(
             raw_response = (
                 agent.next_action(
                     board,
-                    history[-4:],
+                    history_policy.select(history),
                     include_reasoning=True,
                 )
                 if keep_history
