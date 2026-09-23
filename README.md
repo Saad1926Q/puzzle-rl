@@ -210,6 +210,52 @@ evaluation set.
 Keep checkpoint evaluations sequential; parallelism applies to independent
 puzzles within one model evaluation.
 
+## Asynchronous RL Training
+
+The RL trainer uses `AsyncGRPOTrainer` with a custom rollout worker. The
+worker rebuilds each puzzle prompt from the current board and the latest four
+completed board/action turns; it never relies on TRL's append-only
+multi-turn history.
+
+Install the async-RL extra in the training environment:
+
+```bash
+uv sync --extra async-rl
+```
+
+Start vLLM on the inference GPU. The trainer and vLLM server must use separate
+GPU pools:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+VLLM_SERVER_DEV_MODE=1 \
+vllm serve Qwen/Qwen3.5-4B \
+    --port 8000 \
+    --max-model-len 16384 \
+    --logprobs-mode processed_logprobs \
+    --weight-transfer-config '{"backend":"nccl"}'
+```
+
+Launch training on the training GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 \
+uv run python scripts/train_rl.py \
+    --model outputs/sft/qwen3.5-4b/final \
+    --dataset data/eval_puzzles_31.jsonl \
+    --dataset-split train \
+    --vllm-server-url http://localhost:8000 \
+    --history-turns 4 \
+    --max-turns 45
+```
+
+`data/eval_puzzles_31.jsonl` is a smoke-test dataset. Use a larger
+training-only puzzle dataset for actual training and keep the fixed evaluation
+set held out. The custom worker preserves every generated turn's prompt,
+token IDs, and behavior-policy log probabilities for GRPO while only the
+visible context is bounded to four completed turns.
+
+
 ## Metrics and Trajectories
 
 Evaluation reports:

@@ -52,3 +52,17 @@ def test_environment_illegal_tool_call_terminates_episode() -> None:
 def test_environment_requires_reset_before_tool_use() -> None:
     with pytest.raises(RuntimeError, match="reset"):
         PuzzleEnvironment().slide_tile(8)
+
+
+def test_environment_uses_dataset_max_turns_for_timeout() -> None:
+    environment = PuzzleEnvironment()
+    environment.reset(
+        board=(1, 2, 3, 4, 5, 6, 0, 7, 8),
+        optimal_length=2,
+        max_turns=1,
+    )
+
+    environment.slide_tile(7)
+
+    assert environment.outcome == "timeout"
+    assert environment.done is True
