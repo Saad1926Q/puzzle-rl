@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+from puzzle3.environment import (  # noqa: F401
+    DEFAULT_HISTORY_TURNS,
+    DEFAULT_MAX_TURNS,
+    ILLEGAL_OR_MALFORMED_REWARD,
+    MAX_TURNS,
+)
+from puzzle3.rewards import (  # noqa: F401
+    DISTANCE_PROGRESS_WEIGHT,
+    MAX_PUZZLE_DISTANCE,
+    SOLVED_BASE_REWARD,
+    SOLVED_EFFICIENCY_WEIGHT,
+)
+
 
 DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_BASE_URL = "https://api.deepseek.com/beta"
@@ -63,16 +76,6 @@ SLIDE_TILE_TOOL = {
     },
 }
 
-# Rollout/scoring constants.
-SOLVED_BASE_REWARD = 0.8
-SOLVED_EFFICIENCY_WEIGHT = 0.2
-ILLEGAL_OR_MALFORMED_REWARD = -1.0
-
-# Reward legal transitions according to their change in exact solution distance.
-DISTANCE_PROGRESS_WEIGHT = 0.5
-MAX_PUZZLE_DISTANCE = 31
+# Stable labels included in evaluation reports.
 REWARD_SCHEME = "exact_distance_progress_v3"
 ACTION_INTERFACE = "tile_id_v1"
-
-MAX_TURNS = 45
-DEFAULT_MAX_TURNS = MAX_TURNS

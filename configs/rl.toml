@@ -1,4 +1,5 @@
 model = "Qwen/Qwen3.5-4B"
+vllm_model = "Qwen/Qwen3.5-4B"
 dataset = "data/eval_puzzles_31.jsonl"
 dataset_split = "train"
 output_dir = "outputs/rl"
@@ -9,8 +10,7 @@ logging_steps = 1
 per_device_train_batch_size = 1
 gradient_accumulation_steps = 8
 num_generations = 8
-max_completion_length = 512
-max_turns = 45
+max_turn_tokens = 512
 history_turns = 4
 max_inflight_tasks = 16
 max_staleness = 1

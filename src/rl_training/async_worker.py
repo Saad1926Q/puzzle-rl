@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import time
+import uuid
 from typing import Any
 
 from trl.experimental.async_grpo.async_rollout_worker import (
@@ -15,50 +15,44 @@ from trl.experimental.async_grpo.async_rollout_worker import (
 )
 from trl.chat_template_utils import parse_response
 
-from puzzle3.history import LastTurns
-from .environment import PuzzleEnvironment
-from .rollout import PuzzleRolloutEngine
+from evaluation.protocol import HistoryTurn, build_chat_completion_messages
+from puzzle3.environment import DEFAULT_HISTORY_TURNS, PuzzleEnv
 
 
 class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
-    """TRL's async loop with puzzle-specific context reconstruction."""
+    """TRL's async loop with bounded puzzle history."""
 
     def __init__(
         self,
         *,
-        history_turns: int = 4,
-        include_reasoning: bool = True,
+        history_turns: int = DEFAULT_HISTORY_TURNS,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self._history_policy = LastTurns(history_turns)
-        self._include_reasoning = include_reasoning
+        if history_turns < 0:
+            raise ValueError("history_turns must be non-negative")
+        self.history_turns = history_turns
 
     async def _generate_one(
         self,
-        prompt: Messages,
+        _prompt: Messages,
         tool_dict: dict[str, Any],
         tools: list[Any],
         group_id: int = 0,
     ) -> tuple[list[dict[str, Any]], list[int], list[Any], int, int, float | None]:
-        """Generate one puzzle episode while rebuilding the visible context each turn."""
+        """Generate one puzzle episode with a rolling board history."""
 
         slide_tool = tool_dict.get("slide_tile")
         environment = getattr(slide_tool, "__self__", None)
-        if not isinstance(environment, PuzzleEnvironment):
-            return await super()._generate_one(prompt, tool_dict, tools, group_id)
+        if not isinstance(environment, PuzzleEnv):
+            return await super()._generate_one(_prompt, tool_dict, tools, group_id)
 
-        episode = environment.episode
-        if episode is None:
-            raise RuntimeError("PuzzleEnvironment must be reset before generation")
+        if environment.board is None:
+            raise RuntimeError("PuzzleEnv must be reset before generation")
 
         started_at = time.monotonic()
-        rollout_id = __import__("uuid").uuid4().hex
-        context = PuzzleRolloutEngine(
-            initial_prompt=prompt,
-            history_policy=self._history_policy,
-            include_reasoning=self._include_reasoning,
-        )
+        rollout_id = uuid.uuid4().hex
+        history: list[HistoryTurn] = []
         turns: list[TurnRecord] = []
         completion: list[dict[str, Any]] = []
         completion_ids: list[int] = []
@@ -67,8 +61,15 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
         iteration_num = 0
         loop_exhausted = False
 
-        while not episode.done:
-            messages = context.messages(episode.board)
+        while not environment.done:
+            visible_history = (
+                tuple(history[-self.history_turns :]) if self.history_turns else ()
+            )
+            messages = build_chat_completion_messages(
+                environment.board,
+                visible_history,
+                include_reasoning=True,
+            )
             prompt_ids = self.tokenizer.apply_chat_template(
                 messages,
                 return_dict=False,
@@ -89,65 +90,53 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
 
             tool_calls = assistant_message.get("tool_calls")
             if not isinstance(tool_calls, list) or len(tool_calls) != 1:
-                episode.fail("malformed")
+                environment._fail("malformed")
                 break
-            if self.max_tool_calling_iterations is not None and iteration_num >= self.max_tool_calling_iterations:
-                episode.fail("truncated")
+            if (
+                self.max_tool_calling_iterations is not None
+                and iteration_num >= self.max_tool_calling_iterations
+            ):
+                environment._fail("truncated")
                 loop_exhausted = True
                 break
 
-            tool_call_count += 1
             tool_call = tool_calls[0]
-            if not isinstance(tool_call, dict):
+            if not isinstance(tool_call, dict) or not isinstance(
+                tool_call.get("function"), dict
+            ):
                 tool_failure_count += 1
-                episode.fail("malformed")
+                environment._fail("malformed")
                 break
-            function = tool_call.get("function", {})
-            if not isinstance(function, dict):
-                tool_failure_count += 1
-                episode.fail("malformed")
-                break
-            name = function.get("name")
-            self._counters[f"tools/{name}_call_total"] += 1
-            self._rates["tools/parallel_calls_mean"][0] += 1
-            self._rates["tools/parallel_calls_mean"][1] += 1
-            if name != "slide_tile":
-                tool_failure_count += 1
-                self._counters["tools/unknown_name_total"] += 1
-                episode.fail("malformed")
-                result: Any = {"error": f"unknown tool {name}"}
-            else:
-                arguments = function.get("arguments", {})
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = None
-                tile = arguments.get("tile") if isinstance(arguments, dict) else None
-                if type(tile) is not int:
-                    tool_failure_count += 1
-                    episode.fail("malformed")
-                    result = {"error": "slide_tile requires an integer tile"}
-                else:
-                    previous_board = episode.board
-                    started_tool = time.monotonic()
-                    try:
-                        result = slide_tool(tile=tile)
-                    except Exception as error:
-                        tool_failure_count += 1
-                        result = {"error": str(error)}
-                    self._rates["tools/latency_s"][0] += time.monotonic() - started_tool
-                    self._rates["tools/latency_s"][1] += 1
-                    transition = environment.last_transition
-                    if transition is not None and transition.status in {"valid", "solved", "timeout"}:
-                        context.record_action(
-                            board=previous_board,
-                            tile=tile,
-                            assistant_message=assistant_message,
-                        )
+            function = tool_call["function"]
+            tile = (
+                function.get("arguments", {}).get("tile")
+                if isinstance(function.get("arguments"), dict)
+                else None
+            )
 
-            completion.append({"role": "tool", "name": "slide_tile", "content": str(result)})
-            if episode.done:
+            tool_messages, n_calls, n_failures = self._execute_tool_calls(
+                tool_calls, tool_dict
+            )
+            tool_call_count += n_calls
+            tool_failure_count += n_failures
+            completion.extend(tool_messages)
+            if n_failures and not environment.done:
+                environment._fail("malformed")
+            move = environment.last_move
+            if (
+                move is not None
+                and move.status in {"valid", "solved", "timeout"}
+                and type(tile) is int
+            ):
+                history.append(
+                    HistoryTurn(
+                        board=move.board,
+                        tile=tile,
+                        reasoning=assistant_message.get("content") or "",
+                        reasoning_details=assistant_message.get("reasoning_details"),
+                    )
+                )
+            if environment.done:
                 break
             iteration_num += 1
 
@@ -183,55 +172,3 @@ class PuzzleAsyncRolloutWorker(AsyncRolloutWorker):
     """
 
     _loop_cls = _PuzzleAsyncRolloutLoop
-
-
-def build_puzzle_worker_kwargs(
-    *,
-    model_name: str,
-    dataset: Any,
-    processing_class: Any,
-    num_generations: int,
-    max_inflight_tasks: int,
-    vllm_server_url: str,
-    max_tokens: int,
-    temperature: float,
-    top_p: float,
-    top_k: int,
-    min_p: float | None,
-    repetition_penalty: float,
-    request_timeout: int,
-    chat_template_kwargs: dict[str, Any] | None,
-    max_tool_calling_iterations: int | None,
-    log_completions: bool,
-    num_completions_to_print: int | None,
-    fork_threshold_tokens: int,
-    history_turns: int = 4,
-    queue_maxsize: int = 0,
-) -> dict[str, Any]:
-    """Build explicit, picklable kwargs for ``PuzzleAsyncRolloutWorker``."""
-
-    return {
-        "model_name": model_name,
-        "dataset": dataset,
-        "reward_funcs": [],
-        "processing_class": processing_class,
-        "tools": [],
-        "environment_factory": PuzzleEnvironment,
-        "num_generations": num_generations,
-        "max_inflight_tasks": max_inflight_tasks,
-        "queue_maxsize": queue_maxsize,
-        "vllm_server_url": vllm_server_url,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "top_p": top_p,
-        "top_k": top_k,
-        "min_p": min_p,
-        "repetition_penalty": repetition_penalty,
-        "request_timeout": request_timeout,
-        "chat_template_kwargs": chat_template_kwargs,
-        "max_tool_calling_iterations": max_tool_calling_iterations,
-        "log_completions": log_completions,
-        "num_completions_to_print": num_completions_to_print,
-        "fork_threshold_tokens": fork_threshold_tokens,
-        "history_turns": history_turns,
-    }

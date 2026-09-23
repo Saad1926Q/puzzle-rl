@@ -7,23 +7,23 @@ from typing import Any, Callable, Iterable
 
 from tqdm import tqdm
 
-from evaluation.constants import (
-    DEFAULT_MAX_TURNS,
-    ILLEGAL_OR_MALFORMED_REWARD,
-    MAX_TURNS,
-)
+from evaluation.constants import DEFAULT_HISTORY_TURNS, DEFAULT_MAX_TURNS, MAX_TURNS
 from evaluation.dataset import PuzzleExample
 from evaluation.protocol import HistoryTurn, PuzzleAgent, parse_tile
 from evaluation.results import EpisodeResult, EvaluationResult, StepResult
-from evaluation.rewards import (
-    distance_progress_reward,
-    episode_reward,
-    solved_reward,
-)
-from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_tile
-from puzzle3.history import LastTurns
+from evaluation.rewards import distance_progress_reward, episode_reward, solved_reward
+from puzzle3.environment import PuzzleEnv
 
-
+__all__ = [
+    "distance_progress_reward",
+    "episode_reward",
+    "evaluate",
+    "evaluate_episode",
+    "EvaluationResult",
+    "EpisodeResult",
+    "solved_reward",
+    "StepResult",
+]
 
 
 def _discard_progress_rewards(steps: list[StepResult]) -> None:
@@ -31,47 +31,6 @@ def _discard_progress_rewards(steps: list[StepResult]) -> None:
 
     for step in steps:
         step.reward = 0.0
-
-
-def _failed_episode(
-    *,
-    example: PuzzleExample,
-    rollout_id: int,
-    turn: int,
-    board: Board,
-    legal_tiles: tuple[TileAction, ...],
-    raw_response: str | None,
-    tile: TileAction | None,
-    outcome: str,
-    response_metadata: dict[str, Any] | None,
-    steps: list[StepResult],
-    terminal_reward: float = ILLEGAL_OR_MALFORMED_REWARD,
-) -> EpisodeResult:
-    if terminal_reward == ILLEGAL_OR_MALFORMED_REWARD:
-        _discard_progress_rewards(steps)
-    steps.append(
-        StepResult(
-            turn=turn,
-            board=board,
-            legal_tiles=legal_tiles,
-            raw_response=raw_response,
-            tile=tile,
-            next_board=None,
-            status=outcome,
-            response_metadata=response_metadata,
-            reward=terminal_reward,
-            terminal_reward=terminal_reward,
-        )
-    )
-    return EpisodeResult(
-        example=example,
-        outcome=outcome,
-        reward=episode_reward(steps),
-        moves_taken=turn - 1,
-        final_board=board,
-        steps=steps,
-        rollout_id=rollout_id,
-    )
 
 
 def evaluate_episode(
@@ -82,38 +41,53 @@ def evaluate_episode(
     rollout_id: int = 0,
     keep_history: bool = False,
 ) -> EpisodeResult:
-    """Run one puzzle with environment-authoritative outcome scoring.
-
-    Timeouts retain accumulated exact-distance progress. Solved episodes receive
-    only the bounded efficiency reward, while invalid responses receive only their
-    terminal penalty. Per-step progress remains available as a diagnostic.
-    """
+    """Run one puzzle through the shared environment."""
 
     if not 1 <= max_turns <= MAX_TURNS:
         raise ValueError(f"max_turns must be between 1 and {MAX_TURNS}")
 
-    board = example.board
+    environment = PuzzleEnv()
+    environment.reset(
+        board=example.board,
+        optimal_length=example.optimal_length,
+        max_turns=max_turns,
+    )
     history: list[HistoryTurn] = []
     steps: list[StepResult] = []
-    history_policy = LastTurns()
-    if is_solved(board):
-        return EpisodeResult(
-            example=example,
-            outcome="solved",
-            reward=solved_reward(example.optimal_length, 0),
-            moves_taken=0,
-            final_board=board,
-            steps=steps,
-            rollout_id=rollout_id,
+
+    def record_step(
+        turn: int,
+        result: Any,
+        raw_response: str | None,
+        response_metadata: dict[str, Any] | None,
+    ) -> None:
+        if result.status in {"solved", "illegal", "malformed", "truncated"}:
+            _discard_progress_rewards(steps)
+        steps.append(
+            StepResult(
+                turn=turn,
+                board=result.board,
+                legal_tiles=result.legal_tiles,
+                raw_response=raw_response,
+                tile=result.tile,
+                next_board=result.next_board,
+                status=result.status,
+                response_metadata=response_metadata,
+                reward=result.reward,
+                progress_reward=result.progress_reward,
+                terminal_reward=result.terminal_reward,
+            )
         )
 
-    for turn in range(1, max_turns + 1):
-        available = adjacent_tiles(board)
+    while not environment.done:
+        board = environment.board
+        assert board is not None
+        turn = environment.moves + 1
         try:
             raw_response = (
                 agent.next_action(
                     board,
-                    history_policy.select(history),
+                    tuple(history[-DEFAULT_HISTORY_TURNS:]),
                     include_reasoning=True,
                 )
                 if keep_history
@@ -123,78 +97,30 @@ def evaluate_episode(
             response_metadata = getattr(agent, "last_response_metadata", None)
             if not response_metadata or response_metadata.get("status") != "api_error":
                 raise
-            return _failed_episode(
-                example=example,
-                rollout_id=rollout_id,
-                turn=turn,
-                board=board,
-                legal_tiles=available,
-                raw_response=None,
-                tile=None,
-                outcome="api_error",
-                response_metadata=response_metadata,
-                steps=steps,
-                terminal_reward=0.0,
-            )
+            result = environment._fail("api_error")
+            record_step(turn, result, None, response_metadata)
+            break
+
         response_metadata = getattr(agent, "last_response_metadata", None)
         tile = parse_tile(raw_response)
         if tile is None:
-            outcome = (
+            status = (
                 "truncated"
                 if response_metadata and response_metadata.get("truncated")
                 else "malformed"
             )
-            return _failed_episode(
-                example=example,
-                rollout_id=rollout_id,
-                turn=turn,
-                board=board,
-                legal_tiles=available,
-                raw_response=raw_response,
-                tile=None,
-                outcome=outcome,
-                response_metadata=response_metadata,
-                steps=steps,
-            )
+            result = environment._fail(status)
+            record_step(turn, result, raw_response, response_metadata)
+            break
 
-        if tile not in available:
-            return _failed_episode(
-                example=example,
-                rollout_id=rollout_id,
-                turn=turn,
-                board=board,
-                legal_tiles=available,
-                raw_response=raw_response,
-                tile=tile,
-                outcome="illegal",
-                response_metadata=response_metadata,
-                steps=steps,
-            )
+        result = environment._move(tile)
+        record_step(turn, result, raw_response, response_metadata)
+        if result.done:
+            break
 
-        next_board = slide_tile(board, tile)
-        solved = is_solved(next_board)
-        progress_reward = distance_progress_reward(board, next_board)
-        terminal_reward = solved_reward(example.optimal_length, turn) if solved else 0.0
-        if solved:
-            _discard_progress_rewards(steps)
-        steps.append(
-            StepResult(
-                turn=turn,
-                board=board,
-                legal_tiles=available,
-                raw_response=raw_response,
-                tile=tile,
-                next_board=next_board,
-                status="solved" if solved else "valid",
-                response_metadata=response_metadata,
-                reward=terminal_reward if solved else progress_reward,
-                progress_reward=progress_reward,
-                terminal_reward=terminal_reward,
-            )
-        )
         history.append(
             HistoryTurn(
-                board=board,
+                board=result.board,
                 tile=tile,
                 reasoning=(
                     response_metadata.get("reasoning_content", "")
@@ -208,24 +134,15 @@ def evaluate_episode(
                 ),
             )
         )
-        board = next_board
-        if solved:
-            return EpisodeResult(
-                example=example,
-                outcome="solved",
-                reward=episode_reward(steps),
-                moves_taken=turn,
-                final_board=board,
-                steps=steps,
-                rollout_id=rollout_id,
-            )
 
+    final_board = environment.board
+    assert final_board is not None
     return EpisodeResult(
         example=example,
-        outcome="timeout",
-        reward=episode_reward(steps),
-        moves_taken=max_turns,
-        final_board=board,
+        outcome=environment.outcome,
+        reward=episode_reward(steps) if steps else environment.reward,
+        moves_taken=environment.moves,
+        final_board=final_board,
         steps=steps,
         rollout_id=rollout_id,
     )

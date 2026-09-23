@@ -291,7 +291,7 @@ def test_num_rollouts_must_be_positive() -> None:
         evaluate([task], SequenceAgent(['{"tile": 8}']), num_rollouts=0)
 
 def test_valid_unsolved_trajectory_at_limit_keeps_progress_reward() -> None:
-    task = example((1, 2, 3, 4, 5, 6, 0, 7, 8))
+    task = example((1, 2, 3, 4, 5, 6, 0, 7, 8), optimal_length=2)
     result = evaluate_episode(task, SequenceAgent(['{"tile": 7}']), max_turns=1)
     assert result.outcome == "timeout"
     assert result.reward == pytest.approx(0.5 / 31)
