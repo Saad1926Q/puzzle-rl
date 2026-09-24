@@ -17,6 +17,7 @@ from trl.experimental.async_grpo.async_rollout_worker import (
 
 from evaluation.protocol import HistoryTurn, build_chat_completion_messages
 from puzzle3.environment import DEFAULT_HISTORY_TURNS, PuzzleEnv
+from sft_generation.training import normalize_tool_arguments
 
 
 class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
@@ -68,6 +69,7 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
                 visible_history,
                 include_reasoning=True,
             )
+            messages = normalize_tool_arguments({"prompt": messages})["prompt"]
             prompt_ids = self.tokenizer.apply_chat_template(
                 messages,
                 return_dict=False,

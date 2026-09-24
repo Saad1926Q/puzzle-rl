@@ -84,5 +84,5 @@ def test_async_loop_rebuilds_prompt_from_last_four_turns() -> None:
     second_prompt = tokenizer.prompts[1]
     assert second_prompt[0]["role"] == "system"
     assert second_prompt[0]["content"].startswith("You solve one 3x3 sliding puzzle")
-    assert second_prompt[2]["tool_calls"][0]["function"]["arguments"] == '{"tile": 7}'
+    assert second_prompt[2]["tool_calls"][0]["function"]["arguments"] == {"tile": 7}
     assert "Board after that action" in second_prompt[3]["content"]
