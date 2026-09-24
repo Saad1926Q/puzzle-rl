@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from typing import Any
 
@@ -57,6 +58,7 @@ def test_async_loop_rebuilds_prompt_from_last_four_turns() -> None:
     loop.history_turns = 4
     loop._fork_threshold_tokens = 1024
     loop._counters = defaultdict(float)
+    loop._tool_pool = ThreadPoolExecutor(max_workers=1)
     loop._rates = defaultdict(lambda: [0.0, 0.0])
     loop._push_rollout_metrics = lambda **_: None
 
@@ -69,6 +71,7 @@ def test_async_loop_rebuilds_prompt_from_last_four_turns() -> None:
     completion, completion_ids, sequences, calls, failures, reward = asyncio.run(
         loop._generate_one([], {"slide_tile": env.slide_tile}, [env.slide_tile])
     )
+    loop._tool_pool.shutdown(wait=True)
 
     assert env.outcome == "solved"
     assert calls == 2

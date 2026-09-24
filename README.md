@@ -229,12 +229,19 @@ GPU pools:
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
 VLLM_SERVER_DEV_MODE=1 \
+VLLM_ALLOW_RUNTIME_LORA_UPDATING=1 \
 vllm serve Qwen/Qwen3.5-4B \
     --port 8000 \
     --max-model-len 16384 \
-    --logprobs-mode processed_logprobs \
-    --weight-transfer-config '{"backend":"nccl"}'
+    --enable-lora \
+    --max-lora-rank 16 \
+    --max-loras 6 \
+    --logprobs-mode processed_logprobs
 ```
+
+`--enable-lora` lets the native TRL async trainer publish only the LoRA
+adapter at each sync. Keep `--max-loras` at least `max_staleness + 2`; the
+trainer keeps multiple adapter versions while rollouts are in flight.
 
 Launch training on the training GPU:
 

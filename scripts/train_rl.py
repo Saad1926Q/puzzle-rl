@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, load_dataset
+from peft import LoraConfig
 from transformers import AutoTokenizer
 from trl.experimental.async_grpo import AsyncGRPOConfig, AsyncGRPOTrainer
 
@@ -20,7 +21,23 @@ from puzzle3.environment import (
 from puzzle3.solver import exact_distance
 from rl_training.async_worker import PuzzleAsyncRolloutWorker
 
-DEFAULT_CONFIG = Path("configs/rl.toml")
+QWEN35_LORA_TARGET_MODULES = [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "in_proj_qkv",
+    "in_proj_z",
+    "in_proj_a",
+    "in_proj_b",
+    "out_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+
+DEFAULT_CONFIG = Path("configs/rl/run_1.toml")
 
 
 def read_config(path: Path) -> dict[str, Any]:
@@ -41,9 +58,13 @@ def parse_args() -> argparse.Namespace:
         "--vllm-model", default=defaults.get("vllm_model", defaults.get("model"))
     )
     parser.add_argument(
-        "--dataset", default=defaults.get("dataset", "data/eval_puzzles_31.jsonl")
+        "--dataset",
+        default=defaults.get("dataset", "saad1926q/8-puzzle"),
     )
-    parser.add_argument("--dataset-config", default=defaults.get("dataset_config"))
+    parser.add_argument(
+        "--dataset-subset",
+        default=defaults.get("dataset_subset", "rl"),
+    )
     parser.add_argument(
         "--dataset-split", default=defaults.get("dataset_split", "train")
     )
@@ -57,6 +78,11 @@ def parse_args() -> argparse.Namespace:
         default=defaults.get("vllm_server_url", "http://localhost:8000"),
     )
     parser.add_argument("--max-steps", type=int, default=defaults.get("max_steps", 100))
+    parser.add_argument(
+        "--num-train-epochs",
+        type=float,
+        default=defaults.get("num_train_epochs", 1.0),
+    )
     parser.add_argument(
         "--save-steps", type=int, default=defaults.get("save_steps", 20)
     )
@@ -115,21 +141,24 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=defaults.get("gradient_checkpointing", True),
     )
+    parser.add_argument(
+        "--use-lora",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.get("use_lora", True),
+    )
+    parser.add_argument("--lora-r", type=int, default=defaults.get("lora_r", 16))
+    parser.add_argument(
+        "--lora-alpha", type=int, default=defaults.get("lora_alpha", 16)
+    )
     return parser.parse_args()
 
 
 def load_training_data(
-    source: str, config: str | None, split: str, max_turns: int
+    dataset_name: str, subset: str, split: str, max_turns: int
 ) -> Dataset:
-    path = Path(source)
-    if path.is_file():
-        dataset = load_dataset("json", data_files={split: str(path)}, split=split)
-    elif config:
-        dataset = load_dataset(source, config, split=split)
-    else:
-        dataset = load_dataset(source, split=split)
+    dataset = load_dataset(dataset_name, name=subset, split=split)
 
-    if not dataset:
+    if len(dataset) == 0:
         raise ValueError("RL dataset is empty")
 
     def normalize(row: dict[str, Any]) -> dict[str, Any]:
@@ -149,8 +178,10 @@ def load_training_data(
 
 def main() -> None:
     args = parse_args()
-    if args.max_steps <= 0:
-        raise ValueError("--max-steps must be positive")
+    if args.max_steps == 0:
+        raise ValueError("--max-steps must be positive or -1 for epoch-driven training")
+    if args.max_steps < 0 and args.num_train_epochs <= 0:
+        raise ValueError("--num-train-epochs must be positive when --max-steps is -1")
     if args.num_generations < 2:
         raise ValueError("--num-generations must be at least 2 for GRPO")
     if not 1 <= args.max_turns <= MAX_TURNS:
@@ -159,9 +190,13 @@ def main() -> None:
         raise ValueError("--history-turns must be non-negative")
     if args.max_turn_tokens <= 0:
         raise ValueError("--max-turn-tokens must be positive")
+    if args.use_lora and args.lora_r <= 0:
+        raise ValueError("--lora-r must be positive")
+    if args.use_lora and args.lora_alpha <= 0:
+        raise ValueError("--lora-alpha must be positive")
 
     dataset = load_training_data(
-        args.dataset, args.dataset_config, args.dataset_split, args.max_turns
+        args.dataset, args.dataset_subset, args.dataset_split, args.max_turns
     )
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     if tokenizer.pad_token is None:
@@ -170,6 +205,7 @@ def main() -> None:
     training_args = AsyncGRPOConfig(
         output_dir=str(args.output_dir),
         max_steps=args.max_steps,
+        num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
@@ -209,19 +245,29 @@ def main() -> None:
         repetition_penalty=1.0,
         request_timeout=training_args.vllm_server_timeout,
         chat_template_kwargs=training_args.chat_template_kwargs,
-        max_tool_calling_iterations=args.max_turns,
         log_completions=training_args.log_completions,
         num_completions_to_print=training_args.num_completions_to_print,
         fork_threshold_tokens=training_args.fork_threshold_tokens,
         history_turns=args.history_turns,
     )
-    trainer = AsyncGRPOTrainer(
-        model=args.model,
-        args=training_args,
-        train_dataset=dataset,
-        processing_class=tokenizer,
-        rollout_worker=worker,
-    )
+    trainer_kwargs: dict[str, Any] = {
+        "model": args.model,
+        "args": training_args,
+        "train_dataset": dataset,
+        "processing_class": tokenizer,
+        "rollout_worker": worker,
+    }
+    if args.use_lora:
+        trainer_kwargs["peft_config"] = LoraConfig(
+            task_type="CAUSAL_LM",
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=0.0,
+            bias="none",
+            use_rslora=False,
+            target_modules=QWEN35_LORA_TARGET_MODULES,
+        )
+    trainer = AsyncGRPOTrainer(**trainer_kwargs)
     trainer.train()
     trainer.save_model(str(args.output_dir / "final"))
     tokenizer.save_pretrained(str(args.output_dir / "final"))

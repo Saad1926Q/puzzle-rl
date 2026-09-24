@@ -13,7 +13,7 @@ dependencies = [
     "torch==2.11.0",
     "tqdm>=4.68.3",
     "transformers==5.13.0",
-    "trl==1.12.0",
+    "trl @ git+https://github.com/huggingface/trl.git@c8ef243357c38f42733a834a5b4740e47c0bba2",
     "wandb>=0.28.0",
 ]
 
@@ -31,6 +31,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/puzzle3", "src/evaluation", "src/sft_generation", "src/rl_training"]

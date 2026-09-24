@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Any
 
+from trl.chat_template_utils import parse_response
 from trl.experimental.async_grpo.async_rollout_worker import (
     AsyncRolloutWorker,
     Messages,
@@ -13,7 +14,6 @@ from trl.experimental.async_grpo.async_rollout_worker import (
     _AsyncRolloutLoop,
     _chain_to_sequences,
 )
-from trl.chat_template_utils import parse_response
 
 from evaluation.protocol import HistoryTurn, build_chat_completion_messages
 from puzzle3.environment import DEFAULT_HISTORY_TURNS, PuzzleEnv
@@ -58,8 +58,6 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
         completion_ids: list[int] = []
         tool_call_count = 0
         tool_failure_count = 0
-        iteration_num = 0
-        loop_exhausted = False
 
         while not environment.done:
             visible_history = (
@@ -92,13 +90,6 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
             if not isinstance(tool_calls, list) or len(tool_calls) != 1:
                 environment._fail("malformed")
                 break
-            if (
-                self.max_tool_calling_iterations is not None
-                and iteration_num >= self.max_tool_calling_iterations
-            ):
-                environment._fail("truncated")
-                loop_exhausted = True
-                break
 
             tool_call = tool_calls[0]
             if not isinstance(tool_call, dict) or not isinstance(
@@ -114,7 +105,7 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
                 else None
             )
 
-            tool_messages, n_calls, n_failures = self._execute_tool_calls(
+            tool_messages, n_calls, n_failures = await self._execute_tool_calls(
                 tool_calls, tool_dict
             )
             tool_call_count += n_calls
@@ -138,7 +129,6 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
                 )
             if environment.done:
                 break
-            iteration_num += 1
 
         sequences, tally = _chain_to_sequences(
             turns,
@@ -150,7 +140,7 @@ class _PuzzleAsyncRolloutLoop(_AsyncRolloutLoop):
             sequences=len(sequences),
             completion_ids=completion_ids,
             tally=tally,
-            loop_exhausted=loop_exhausted,
+            loop_exhausted=False,
             duration_s=time.monotonic() - started_at,
         )
         return (
