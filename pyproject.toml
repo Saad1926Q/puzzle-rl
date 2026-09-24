@@ -11,6 +11,8 @@ dependencies = [
     "peft>=0.20.0",
     "python-dotenv>=1.1.0",
     "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "torchvision==0.26.0",
     "tqdm>=4.68.3",
     "transformers==5.13.0",
     "trl @ git+https://github.com/huggingface/trl.git@c8ef243357c38f42733a834a5b4740e47c0bba2",
@@ -45,6 +47,9 @@ explicit = true
 
 [tool.uv.sources]
 torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
     { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 torchvision = [
