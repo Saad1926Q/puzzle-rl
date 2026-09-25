@@ -48,6 +48,13 @@ def positive_int(value: str) -> int:
     return number
 
 
+def nonnegative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="saad1926q/8-puzzle")
@@ -144,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--temperature", type=float, default=DEFAULT_QWEN_TEMPERATURE)
     parser.add_argument("--top-p", type=float, default=DEFAULT_QWEN_TOP_P)
-    parser.add_argument("--top-k", type=positive_int, default=DEFAULT_QWEN_TOP_K)
+    parser.add_argument("--top-k", type=nonnegative_int, default=DEFAULT_QWEN_TOP_K)
     parser.add_argument(
         "--presence-penalty", type=float, default=DEFAULT_QWEN_PRESENCE_PENALTY
     )

@@ -143,8 +143,12 @@ class ProviderSettings:
             thinking=provider.default_thinking if args.thinking is None else args.thinking,
             reasoning_effort=(
                 args.reasoning_effort
-                if args.reasoning_effort is not None or args.provider == "openrouter"
-                else DEFAULT_REASONING_EFFORT
+                if args.reasoning_effort is not None
+                else (
+                    None
+                    if args.provider in {"qwen", "openrouter"}
+                    else DEFAULT_REASONING_EFFORT
+                )
             ),
             max_tokens=args.max_tokens,
             temperature=args.temperature,

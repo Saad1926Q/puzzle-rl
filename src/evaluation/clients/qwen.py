@@ -28,7 +28,7 @@ class QwenAgent(ChatCompletionAgent):
         model: str = DEFAULT_QWEN_MODEL,
         base_url: str = DEFAULT_QWEN_BASE_URL,
         thinking: bool = False,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_QWEN_TEMPERATURE,
         top_p: float = DEFAULT_QWEN_TOP_P,
@@ -42,12 +42,16 @@ class QwenAgent(ChatCompletionAgent):
             raise ValueError("temperature must be non-negative")
         if not 0 < top_p <= 1:
             raise ValueError("top_p must be in (0, 1]")
-        if top_k <= 0:
-            raise ValueError("top_k must be positive")
+        if top_k < 0:
+            raise ValueError("top_k must be non-negative")
         if repetition_penalty <= 0:
             raise ValueError("repetition_penalty must be positive")
-        if reasoning_effort not in {"low", "medium", "xhigh"}:
-            raise ValueError("reasoning_effort must be low, medium, or xhigh")
+        if reasoning_effort is not None and reasoning_effort not in {
+            "low",
+            "medium",
+            "xhigh",
+        }:
+            raise ValueError("reasoning_effort must be low, medium, xhigh, or None")
         if client is None:
             from openai import OpenAI
 
@@ -83,6 +87,6 @@ class QwenAgent(ChatCompletionAgent):
                 "chat_template_kwargs": {"enable_thinking": self.thinking},
             },
         }
-        if self.thinking:
+        if self.thinking and self.reasoning_effort is not None:
             options["reasoning_effort"] = self.reasoning_effort
         return options
