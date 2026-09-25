@@ -73,7 +73,9 @@ def _looks_truncated(tokenizer: Any, completion_ids: list[int]) -> bool:
     return completion_ids[-1] not in terminal_ids
 
 
-def _tool_tile(message: dict[str, Any]) -> int | None:
+def _tool_tile(message: Any) -> int | None:
+    if not isinstance(message, dict):
+        return None
     tool_calls = message.get("tool_calls")
     if not isinstance(tool_calls, list) or len(tool_calls) != 1:
         return None
