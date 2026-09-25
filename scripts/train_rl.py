@@ -1,4 +1,4 @@
-"""Train the 8-puzzle policy with bounded-history asynchronous GRPO."""
+"""Train the 8-puzzle policy with synchronous bounded-history GRPO."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from datasets import Dataset, load_dataset
 from peft import LoraConfig
 from transformers import AutoTokenizer
-from trl.experimental.async_grpo import AsyncGRPOConfig, AsyncGRPOTrainer
+from trl import GRPOConfig
 
 from puzzle3.environment import (
     DEFAULT_HISTORY_TURNS,
@@ -19,7 +19,7 @@ from puzzle3.environment import (
     PuzzleEnv,
 )
 from puzzle3.solver import exact_distance
-from rl_training.async_worker import PuzzleAsyncRolloutWorker
+from rl_training.grpo_trainer import PuzzleGRPOTrainer
 
 QWEN35_LORA_TARGET_MODULES = [
     "q_proj",
@@ -55,9 +55,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=bootstrap_args.config)
     parser.add_argument("--model", default=defaults.get("model", "Qwen/Qwen3.5-4B"))
     parser.add_argument(
-        "--vllm-model", default=defaults.get("vllm_model", defaults.get("model"))
-    )
-    parser.add_argument(
         "--dataset",
         default=defaults.get("dataset", "saad1926q/8-puzzle"),
     )
@@ -76,6 +73,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vllm-server-url",
         default=defaults.get("vllm_server_url", "http://localhost:8000"),
+    )
+    parser.add_argument(
+        "--vllm-mode",
+        choices=("colocate", "server"),
+        default=defaults.get("vllm_mode", "colocate"),
+    )
+    parser.add_argument(
+        "--use-vllm",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.get("use_vllm", True),
+    )
+    parser.add_argument(
+        "--vllm-gpu-memory-utilization",
+        type=float,
+        default=defaults.get("vllm_gpu_memory_utilization", 0.3),
+    )
+    parser.add_argument(
+        "--vllm-enable-sleep-mode",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.get("vllm_enable_sleep_mode", True),
     )
     parser.add_argument("--max-steps", type=int, default=defaults.get("max_steps", 100))
     parser.add_argument(
@@ -112,15 +129,6 @@ def parse_args() -> argparse.Namespace:
         "--history-turns",
         type=int,
         default=defaults.get("history_turns", DEFAULT_HISTORY_TURNS),
-    )
-    parser.add_argument(
-        "--max-inflight-tasks", type=int, default=defaults.get("max_inflight_tasks", 16)
-    )
-    parser.add_argument(
-        "--max-staleness", type=int, default=defaults.get("max_staleness", 1)
-    )
-    parser.add_argument(
-        "--weight-sync-steps", type=int, default=defaults.get("weight_sync_steps", 1)
     )
     parser.add_argument(
         "--learning-rate", type=float, default=defaults.get("learning_rate", 1e-6)
@@ -178,6 +186,10 @@ def load_training_data(
 
 def main() -> None:
     args = parse_args()
+    if not args.use_vllm:
+        raise ValueError("synchronous puzzle training requires --use-vllm")
+    if not 0.0 < args.vllm_gpu_memory_utilization < 1.0:
+        raise ValueError("--vllm-gpu-memory-utilization must be between 0 and 1")
     if args.max_steps == 0:
         raise ValueError("--max-steps must be positive or -1 for epoch-driven training")
     if args.max_steps < 0 and args.num_train_epochs <= 0:
@@ -202,20 +214,28 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    training_args = AsyncGRPOConfig(
+    training_args = GRPOConfig(
         output_dir=str(args.output_dir),
         max_steps=args.max_steps,
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        generation_batch_size=args.num_generations,
         learning_rate=args.learning_rate,
         num_generations=args.num_generations,
         max_completion_length=args.max_turn_tokens,
         max_tool_calling_iterations=args.max_turns,
-        max_staleness=args.max_staleness,
-        max_inflight_tasks=args.max_inflight_tasks,
+        use_vllm=args.use_vllm,
+        vllm_mode=args.vllm_mode,
         vllm_server_base_url=args.vllm_server_url,
-        weight_sync_steps=args.weight_sync_steps,
+        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        vllm_enable_sleep_mode=args.vllm_enable_sleep_mode,
+        vllm_importance_sampling_correction=True,
+        loss_type="dapo",
+        epsilon=0.2,
+        epsilon_high=0.28,
+        mask_truncated_completions=True,
+        beta=0.0,
         temperature=args.temperature,
         top_p=args.top_p,
         logging_steps=args.logging_steps,
@@ -226,36 +246,15 @@ def main() -> None:
         data_seed=args.seed,
         bf16=args.bf16,
         gradient_checkpointing=args.gradient_checkpointing,
-    )
-    worker = PuzzleAsyncRolloutWorker(
-        model_name=args.vllm_model,
-        dataset=dataset,
-        reward_funcs=[],
-        processing_class=tokenizer,
-        tools=[],
-        environment_factory=PuzzleEnv,
-        num_generations=args.num_generations,
-        max_inflight_tasks=args.max_inflight_tasks,
-        vllm_server_url=args.vllm_server_url,
-        max_tokens=args.max_turn_tokens,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        top_k=0,
-        min_p=None,
-        repetition_penalty=1.0,
-        request_timeout=training_args.vllm_server_timeout,
-        chat_template_kwargs=training_args.chat_template_kwargs,
-        log_completions=training_args.log_completions,
-        num_completions_to_print=training_args.num_completions_to_print,
-        fork_threshold_tokens=training_args.fork_threshold_tokens,
-        history_turns=args.history_turns,
+        chat_template_kwargs={"enable_thinking": False},
     )
     trainer_kwargs: dict[str, Any] = {
         "model": args.model,
         "args": training_args,
         "train_dataset": dataset,
         "processing_class": tokenizer,
-        "rollout_worker": worker,
+        "environment_factory": PuzzleEnv,
+        "history_turns": args.history_turns,
     }
     if args.use_lora:
         trainer_kwargs["peft_config"] = LoraConfig(
@@ -267,10 +266,11 @@ def main() -> None:
             use_rslora=False,
             target_modules=QWEN35_LORA_TARGET_MODULES,
         )
-    trainer = AsyncGRPOTrainer(**trainer_kwargs)
+    trainer = PuzzleGRPOTrainer(**trainer_kwargs)
     trainer.train()
     trainer.save_model(str(args.output_dir / "final"))
     tokenizer.save_pretrained(str(args.output_dir / "final"))
+
 
 
 if __name__ == "__main__":
