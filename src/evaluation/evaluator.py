@@ -61,7 +61,7 @@ def evaluate_episode(
         raw_response: str | None,
         response_metadata: dict[str, Any] | None,
     ) -> None:
-        if result.status in {"solved", "illegal", "malformed", "truncated"}:
+        if result.status == "solved":
             _discard_progress_rewards(steps)
         steps.append(
             StepResult(

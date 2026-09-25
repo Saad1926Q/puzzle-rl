@@ -217,7 +217,7 @@ class PuzzleEnv:
         self.outcome = status
         self.done = True
         self.terminal_reward = terminal_reward
-        self.reward = terminal_reward
+        self.reward = self.progress_reward + terminal_reward
         return self._remember(
             MoveResult(
                 board=self._require_board(),

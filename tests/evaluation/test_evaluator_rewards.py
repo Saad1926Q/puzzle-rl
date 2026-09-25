@@ -192,16 +192,18 @@ def test_illegal_move_ends_immediately_with_negative_reward() -> None:
     assert result.steps[0].tile == 1
     assert len(result.steps) == 1
 
-def test_illegal_move_discards_prior_progress_from_total_reward() -> None:
+def test_illegal_move_preserves_prior_progress_with_penalty() -> None:
     task = example((1, 2, 3, 4, 5, 6, 0, 7, 8), optimal_length=2)
     result = evaluate_episode(
         task, SequenceAgent(['{"tile": 7}', '{"tile": 1}'])
     )
-    assert result.outcome == "illegal"
-    assert result.reward == -1.0
-    assert [step.reward for step in result.steps] == [0.0, -1.0]
-    assert result.steps[0].progress_reward == pytest.approx(0.5 / 31)
 
+    assert result.outcome == "illegal"
+    assert result.reward == pytest.approx(0.5 / 31 - 1.0)
+    assert [step.reward for step in result.steps] == pytest.approx(
+        [0.5 / 31, -1.0]
+    )
+    assert result.steps[0].progress_reward == pytest.approx(0.5 / 31)
 
 def test_malformed_response_ends_immediately_with_negative_reward() -> None:
     task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))

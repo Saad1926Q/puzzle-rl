@@ -40,16 +40,39 @@ def test_timeout_keeps_progress_reward() -> None:
     assert env.done is True
 
 
-def test_illegal_move_ends_episode_and_returns_negative_reward() -> None:
+def test_illegal_move_preserves_progress_and_applies_penalty() -> None:
     env = make_env(TWO_MOVES, 2)
-    env._move(7)
+    first = env._move(7)
 
     result = env._move(1)
 
     assert result.status == "illegal"
     assert env.outcome == "illegal"
-    assert env.reward == -1.0
+    assert env.reward == env.progress_reward - 1.0
+    assert env.reward == first.progress_reward - 1.0
     assert env.progress_reward > 0.0
+
+
+def test_malformed_response_preserves_progress_and_applies_penalty() -> None:
+    env = make_env(TWO_MOVES, 2)
+    first = env._move(7)
+
+    result = env._fail("malformed")
+
+    assert result.status == "malformed"
+    assert env.done is True
+    assert env.reward == first.progress_reward - 1.0
+
+
+def test_truncated_response_preserves_progress_and_applies_penalty() -> None:
+    env = make_env(TWO_MOVES, 2)
+    first = env._move(7)
+
+    result = env._fail("truncated")
+
+    assert result.status == "truncated"
+    assert env.done is True
+    assert env.reward == first.progress_reward - 1.0
 
 
 def test_malformed_response_is_terminal() -> None:
