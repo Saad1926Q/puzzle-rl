@@ -210,58 +210,64 @@ evaluation set.
 Keep checkpoint evaluations sequential; parallelism applies to independent
 puzzles within one model evaluation.
 
-## Asynchronous RL Training
+## Synchronous RL Training
 
-The RL trainer uses `AsyncGRPOTrainer` with a custom rollout worker. The
-worker rebuilds each puzzle prompt from the current board and the latest four
-completed board/action turns; it never relies on TRL's append-only
-multi-turn history.
+RL training uses `PuzzleGRPOTrainer`, a thin adapter over TRL's standard
+`GRPOTrainer`. Puzzle rollouts are generated synchronously in one batched vLLM
+call per generation group. Each generated turn keeps the exact prompt tokens,
+completion tokens, sampled log probabilities, board state, and bounded
+conversation history needed by the optimizer.
 
-Install the async-RL extra in the training environment:
+Install the RL extra and authenticate W&B:
 
 ```bash
-uv sync --extra async-rl
+uv sync --extra rl
+uv run wandb login
 ```
 
-Start vLLM on the inference GPU. The trainer and vLLM server must use separate
-GPU pools:
+The default configuration uses colocated vLLM:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+WANDB_PROJECT=puzzle-rl \
+uv run python scripts/train_rl.py \
+    --config configs/rl/run_1.toml \
+    --report-to wandb
+```
+
+For separate inference and training GPUs, start the standard TRL-compatible
+vLLM server on GPU 0:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
 VLLM_SERVER_DEV_MODE=1 \
 VLLM_ALLOW_RUNTIME_LORA_UPDATING=1 \
-vllm serve Qwen/Qwen3.5-4B \
+uv run vllm serve Qwen/Qwen3.5-4B \
+    --host 0.0.0.0 \
     --port 8000 \
     --max-model-len 16384 \
     --enable-lora \
     --max-lora-rank 16 \
-    --max-loras 6 \
+    --max-loras 4 \
     --logprobs-mode processed_logprobs
 ```
 
-`--enable-lora` lets the native TRL async trainer publish only the LoRA
-adapter at each sync. Keep `--max-loras` at least `max_staleness + 2`; the
-trainer keeps multiple adapter versions while rollouts are in flight.
-
-Launch training on the training GPU:
+Then launch the trainer on GPU 1:
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 \
+WANDB_PROJECT=puzzle-rl \
 uv run python scripts/train_rl.py \
-    --model outputs/sft/qwen3.5-4b/final \
-    --dataset data/eval_puzzles_31.jsonl \
-    --dataset-split train \
-    --vllm-server-url http://localhost:8000 \
-    --history-turns 4 \
-    --max-turns 45
+    --config configs/rl/run_1.toml \
+    --vllm-mode server \
+    --vllm-server-url http://127.0.0.1:8000 \
+    --report-to wandb
 ```
 
-`data/eval_puzzles_31.jsonl` is a smoke-test dataset. Use a larger
-training-only puzzle dataset for actual training and keep the fixed evaluation
-set held out. The custom worker preserves every generated turn's prompt,
-token IDs, and behavior-policy log probabilities for GRPO while only the
-visible context is bounded to four completed turns.
-
+`configs/rl/run_1.toml` enables DAPO loss, truncated-completion masking,
+vLLM importance-sampling correction, LoRA, and W&B reporting. The environment
+reward preserves progress made before malformed, illegal, timeout, or
+truncated terminal failures.
 
 ## Metrics and Trajectories
 

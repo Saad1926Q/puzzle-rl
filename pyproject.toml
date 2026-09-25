@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-async-rl = [
+rl = [
     "vllm>=0.22.0",
 ]
 
