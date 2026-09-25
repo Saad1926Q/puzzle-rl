@@ -69,6 +69,43 @@ class EpisodeResult:
         }
 
 
+def episode_from_dict(
+    data: dict[str, Any],
+    examples_by_id: dict[str, PuzzleExample],
+) -> EpisodeResult:
+    """Reconstruct one checkpointed episode."""
+
+    example_id = data["id"]
+    example = examples_by_id[example_id]
+    steps = [
+        StepResult(
+            turn=step["turn"],
+            board=tuple(step["board"]),
+            legal_tiles=tuple(step["legal_tiles"]),
+            raw_response=step["raw_response"],
+            tile=step["tile"],
+            next_board=(
+                tuple(step["next_board"]) if step["next_board"] is not None else None
+            ),
+            status=step["status"],
+            response_metadata=step["response_metadata"],
+            reward=step["reward"],
+            progress_reward=step["progress_reward"],
+            terminal_reward=step["terminal_reward"],
+        )
+        for step in data["steps"]
+    ]
+    return EpisodeResult(
+        example=example,
+        outcome=data["outcome"],
+        reward=data["reward"],
+        moves_taken=data["moves_taken"],
+        final_board=tuple(data["final_board"]),
+        steps=steps,
+        rollout_id=data["rollout_id"],
+    )
+
+
 @dataclass
 class EvaluationResult:
     episodes: list[EpisodeResult]

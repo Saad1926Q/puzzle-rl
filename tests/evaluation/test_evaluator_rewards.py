@@ -249,6 +249,25 @@ def test_multiple_rollouts_report_rollout_metrics_and_pass_at_k() -> None:
     assert summary["pass@k"] == 1.0
     assert [episode.rollout_id for episode in result.episodes] == [0, 1, 2]
 
+def test_evaluator_skips_completed_rollouts_and_reports_new_episodes() -> None:
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    completed: list[tuple[int, int]] = []
+
+    result = evaluate(
+        [task],
+        SequenceAgent(['{"tile": 8}']),
+        num_rollouts=2,
+        completed_keys={(0, 0)},
+        on_episode_complete=lambda example_index, rollout_id, _episode: completed.append(
+            (example_index, rollout_id)
+        ),
+    )
+
+    assert [(episode.example.example_id, episode.rollout_id) for episode in result.episodes] == [
+        ("test", 1)
+    ]
+    assert completed == [(0, 1)]
+
 def test_parallel_rollouts_preserve_order_and_isolate_agents() -> None:
     import threading
 

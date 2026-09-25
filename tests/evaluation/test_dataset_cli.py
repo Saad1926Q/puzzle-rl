@@ -56,6 +56,87 @@ def test_qwen_cli_uses_local_defaults_and_needs_no_api_key() -> None:
     assert crof_settings.base_url == "https://crof.ai/v1"
     assert crof_settings.api_key_env == "CROF_API_KEY"
 
+
+def test_checkpoint_episode_round_trip(tmp_path) -> None:
+    import runpy
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    result = evaluate([task], SequenceAgent(['{"tile": 8}']))
+    settings = {key: None for key in runner["CHECKPOINT_SETTINGS"]}
+    settings["num_rollouts"] = 1
+    checkpoint = tmp_path / "checkpoint.jsonl"
+    checkpoint.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "metadata",
+                        "version": runner["CHECKPOINT_VERSION"],
+                        "settings": settings,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "episode",
+                        "example_index": 0,
+                        "rollout_id": 0,
+                        "episode": result.episodes[0].to_dict(),
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    completed, episodes = runner["load_checkpoint"](
+        checkpoint,
+        expected_settings=settings,
+        examples=[task],
+    )
+
+    assert completed == {(0, 0)}
+    assert episodes[0][0] == (0, 0)
+    assert episodes[0][1].to_dict() == result.episodes[0].to_dict()
+def test_cli_checkpoint_resume_reuses_completed_episodes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import runpy
+    import sys
+
+    runner = runpy.run_path("scripts/run_eval_8puzzle.py")
+    task = example((1, 2, 3, 4, 5, 6, 7, 0, 8))
+    runner["main"].__globals__["load_examples"] = lambda **_kwargs: [task]
+    runner["main"].__globals__["create_agent_factory"] = (
+        lambda _settings, _dotenv: lambda: SequenceAgent(['{"tile": 8}'])
+    )
+    checkpoint = tmp_path / "checkpoint.jsonl"
+    output = tmp_path / "summary.json"
+    arguments = [
+        "run_eval_8puzzle.py",
+        "--provider",
+        "qwen",
+        "--num-rollouts",
+        "2",
+        "--checkpoint-path",
+        str(checkpoint),
+        "--output",
+        str(output),
+    ]
+
+    monkeypatch.setattr(sys, "argv", arguments)
+    runner["main"]()
+    first_checkpoint_lines = checkpoint.read_text(encoding="utf-8").splitlines()
+    assert len(first_checkpoint_lines) == 3
+
+    monkeypatch.setattr(sys, "argv", [*arguments, "--resume"])
+    runner["main"]()
+
+    assert checkpoint.read_text(encoding="utf-8").splitlines() == first_checkpoint_lines
+    assert json.loads(output.read_text(encoding="utf-8"))["summary"]["num_episodes"] == 2
+
+
 def test_cli_passes_agent_factory_to_evaluator(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

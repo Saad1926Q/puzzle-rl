@@ -28,7 +28,7 @@ from evaluation.dataset import load_examples
 from evaluation.evaluator import evaluate
 from evaluation.providers import PROVIDERS, ProviderSettings, create_agent_factory
 from evaluation.reporting import metadata, write_evaluation_artifacts
-from evaluation.results import EvaluationResult
+from evaluation.results import EpisodeResult, EvaluationResult, episode_from_dict
 
 
 
@@ -184,16 +184,98 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Save complete episode/step traces to a separate JSON file",
     )
+
+    parser.add_argument(
+        "--checkpoint-path",
+        type=Path,
+        default=None,
+        help="Append completed episodes to this JSONL file for resuming",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume unfinished episodes from --checkpoint-path",
+    )
     return parser
 
 
 
+CHECKPOINT_VERSION = 1
+CHECKPOINT_SETTINGS = (
+    "dataset",
+    "config",
+    "split",
+    "num_examples",
+    "offset",
+    "num_rollouts",
+    "max_turns",
+    "provider",
+    "model",
+    "base_url",
+    "thinking",
+    "reasoning_effort",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "top_k",
+    "presence_penalty",
+    "repetition_penalty",
+    "history",
+    "board_representation",
+)
 
 
+def checkpoint_settings(run_metadata: dict[str, object]) -> dict[str, object]:
+    return {key: run_metadata[key] for key in CHECKPOINT_SETTINGS}
 
+
+def load_checkpoint(
+    path: Path,
+    *,
+    expected_settings: dict[str, object],
+    examples: list[object],
+) -> tuple[set[tuple[int, int]], list[tuple[tuple[int, int], EpisodeResult]]]:
+
+    examples_by_id = {example.example_id: example for example in examples}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise ValueError(f"checkpoint is empty: {path}")
+    header = json.loads(lines[0])
+    if (
+        header.get("type") != "metadata"
+        or header.get("version") != CHECKPOINT_VERSION
+        or header.get("settings") != expected_settings
+    ):
+        raise ValueError(f"checkpoint settings do not match this evaluation: {path}")
+
+    completed_keys: set[tuple[int, int]] = set()
+    episodes: list[tuple[tuple[int, int], EpisodeResult]] = []
+    for line_number, line in enumerate(lines[1:], start=2):
+        record = json.loads(line)
+        if record.get("type") != "episode":
+            raise ValueError(f"invalid checkpoint record at {path}:{line_number}")
+        key = (int(record["example_index"]), int(record["rollout_id"]))
+        if key in completed_keys:
+            raise ValueError(f"duplicate checkpoint episode at {path}:{line_number}")
+        example_index, rollout_id = key
+        if not 0 <= example_index < len(examples):
+            raise ValueError(f"checkpoint example index is out of range: {key}")
+        if not 0 <= rollout_id < int(expected_settings["num_rollouts"]):
+            raise ValueError(f"checkpoint rollout ID is out of range: {key}")
+        episode = episode_from_dict(record["episode"], examples_by_id)
+        if episode.example.example_id != examples[example_index].example_id:
+            raise ValueError(f"checkpoint example does not match its index: {key}")
+        if episode.rollout_id != rollout_id:
+            raise ValueError(f"checkpoint rollout does not match its key: {key}")
+        completed_keys.add(key)
+        episodes.append((key, episode))
+    return completed_keys, episodes
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.resume and args.checkpoint_path is None:
+        raise ValueError("--resume requires --checkpoint-path")
+
     settings = ProviderSettings.from_args(args)
     provider = PROVIDERS[settings.provider]
     keep_history = args.history
@@ -207,16 +289,95 @@ def main() -> None:
         offset=args.offset,
     )
     agent_factory = create_agent_factory(settings, args.dotenv)
-
-    result: EvaluationResult = evaluate(
-        examples,
-        max_turns=args.max_turns,
-        num_rollouts=args.num_rollouts,
-        parallelism=args.parallelism,
-        keep_history=keep_history,
-        agent_factory=agent_factory,
-    )
     run_metadata = metadata(args, len(examples), settings)
+
+    completed_keys: set[tuple[int, int]] = set()
+    checkpoint_episodes: list[tuple[tuple[int, int], EpisodeResult]] = []
+    checkpoint_file = None
+    if args.checkpoint_path is not None:
+        settings_for_checkpoint = checkpoint_settings(run_metadata)
+        if args.resume:
+            completed_keys, checkpoint_episodes = load_checkpoint(
+                args.checkpoint_path,
+                expected_settings=settings_for_checkpoint,
+                examples=examples,
+            )
+            checkpoint_file = args.checkpoint_path.open("a", encoding="utf-8")
+        else:
+            if args.checkpoint_path.exists():
+                raise FileExistsError(
+                    f"checkpoint already exists: {args.checkpoint_path}; "
+                    "pass --resume to continue it"
+                )
+            args.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint_file = args.checkpoint_path.open("w", encoding="utf-8")
+            checkpoint_file.write(
+                json.dumps(
+                    {
+                        "type": "metadata",
+                        "version": CHECKPOINT_VERSION,
+                        "settings": settings_for_checkpoint,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            checkpoint_file.flush()
+
+    def on_episode_complete(
+        example_index: int, rollout_id: int, episode: EpisodeResult
+    ) -> None:
+        if checkpoint_file is None:
+            return
+        checkpoint_file.write(
+            json.dumps(
+                {
+                    "type": "episode",
+                    "example_index": example_index,
+                    "rollout_id": rollout_id,
+                    "episode": episode.to_dict(),
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        checkpoint_file.flush()
+
+    try:
+        new_result: EvaluationResult = evaluate(
+            examples,
+            max_turns=args.max_turns,
+            num_rollouts=args.num_rollouts,
+            parallelism=args.parallelism,
+            keep_history=keep_history,
+            agent_factory=agent_factory,
+            completed_keys=completed_keys,
+            on_episode_complete=(
+                on_episode_complete if args.checkpoint_path is not None else None
+            ),
+        )
+    finally:
+        if checkpoint_file is not None:
+            checkpoint_file.close()
+
+    if args.checkpoint_path is None:
+        result = new_result
+    else:
+        episodes_by_key = dict(checkpoint_episodes)
+        example_indices = {
+            example.example_id: index for index, example in enumerate(examples)
+        }
+        for episode in new_result.episodes:
+            key = (example_indices[episode.example.example_id], episode.rollout_id)
+            episodes_by_key[key] = episode
+        episodes = [
+            episodes_by_key[(example_index, rollout_id)]
+            for example_index in range(len(examples))
+            for rollout_id in range(args.num_rollouts)
+            if (example_index, rollout_id) in episodes_by_key
+        ]
+        result = EvaluationResult(episodes, num_rollouts=args.num_rollouts)
+
     trajectory_path = write_evaluation_artifacts(
         args.output,
         run_metadata=run_metadata,

@@ -157,6 +157,8 @@ def evaluate(
     parallelism: int = 1,
     keep_history: bool = False,
     agent_factory: Callable[[], PuzzleAgent] | None = None,
+    completed_keys: set[tuple[int, int]] | None = None,
+    on_episode_complete: Callable[[int, int, EpisodeResult], None] | None = None,
 ) -> EvaluationResult:
     """Evaluate independent puzzle rollouts, optionally in parallel.
 
@@ -175,10 +177,12 @@ def evaluate(
         raise ValueError("agent_factory is required when parallelism > 1")
 
     examples = list(examples)
+    completed_keys = completed_keys or set()
     jobs = [
         (example_index, example, rollout_id)
         for example_index, example in enumerate(examples)
         for rollout_id in range(num_rollouts)
+        if (example_index, rollout_id) not in completed_keys
     ]
 
     def run_job(job: tuple[int, PuzzleExample, int]) -> tuple[int, int, EpisodeResult]:
@@ -201,6 +205,8 @@ def evaluate(
             for job in jobs:
                 example_index, rollout_id, episode = run_job(job)
                 episodes_by_key[(example_index, rollout_id)] = episode
+                if on_episode_complete is not None:
+                    on_episode_complete(example_index, rollout_id, episode)
                 progress.update(1)
         else:
             with ThreadPoolExecutor(max_workers=parallelism) as executor:
@@ -208,6 +214,8 @@ def evaluate(
                 for future in as_completed(futures):
                     example_index, rollout_id, episode = future.result()
                     episodes_by_key[(example_index, rollout_id)] = episode
+                    if on_episode_complete is not None:
+                        on_episode_complete(example_index, rollout_id, episode)
                     progress.update(1)
     finally:
         progress.close()
@@ -216,5 +224,6 @@ def evaluate(
         episodes_by_key[(example_index, rollout_id)]
         for example_index, _example in enumerate(examples)
         for rollout_id in range(num_rollouts)
+        if (example_index, rollout_id) in episodes_by_key
     ]
     return EvaluationResult(episodes, num_rollouts=num_rollouts)
