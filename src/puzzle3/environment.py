@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 from puzzle3.board import Board, TileAction, adjacent_tiles, is_solved, slide_tile
-from puzzle3.rewards import distance_progress_reward, solved_reward
+from puzzle3.rewards import (
+    bounded_progress_reward,
+    distance_progress_reward,
+    solved_reward,
+)
 from puzzle3.solver import exact_distance
 
 MAX_TURNS = 45
@@ -102,7 +106,11 @@ class PuzzleEnv:
             return self._finish_failure(tile, legal_tiles, "illegal")
 
         next_board = slide_tile(board, tile)
-        progress_reward = distance_progress_reward(board, next_board)
+        progress_reward = distance_progress_reward(
+            board,
+            next_board,
+            initial_distance=self.optimal_length,
+        )
         self.board = next_board
         self.moves += 1
         self.progress_reward += progress_reward
@@ -129,7 +137,10 @@ class PuzzleEnv:
         if self.moves >= self.max_turns:
             self.outcome = "timeout"
             self.done = True
-            self.reward = self.progress_reward
+            self.reward = bounded_progress_reward(
+                self.optimal_length,
+                exact_distance(next_board),
+            )
             return self._remember(
                 MoveResult(
                     board=board,
@@ -217,7 +228,10 @@ class PuzzleEnv:
         self.outcome = status
         self.done = True
         self.terminal_reward = terminal_reward
-        self.reward = self.progress_reward + terminal_reward
+        self.reward = bounded_progress_reward(
+            self.optimal_length,
+            exact_distance(self._require_board()),
+        ) + terminal_reward
         return self._remember(
             MoveResult(
                 board=self._require_board(),

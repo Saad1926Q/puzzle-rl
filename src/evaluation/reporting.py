@@ -50,7 +50,7 @@ def metadata(
         "action_interface": ACTION_INTERFACE,
         "reward_scheme": REWARD_SCHEME,
         "distance_progress_weight": DISTANCE_PROGRESS_WEIGHT,
-        "max_puzzle_distance": MAX_PUZZLE_DISTANCE,
+        "progress_normalization": "optimal_length",
     }
     if args.provider == "openrouter":
         result.update(

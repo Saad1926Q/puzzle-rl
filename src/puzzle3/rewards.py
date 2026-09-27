@@ -24,9 +24,29 @@ def distance_progress_reward(
     board: Board,
     next_board: Board,
     *,
+    initial_distance: int,
     weight: float = DISTANCE_PROGRESS_WEIGHT,
 ) -> float:
-    """Reward a transition according to its exact-distance improvement."""
+    """Reward one transition by its initial-distance-normalized progress."""
 
+    if initial_distance <= 0:
+        raise ValueError("initial_distance must be positive")
     distance_improvement = exact_distance(board) - exact_distance(next_board)
-    return weight * distance_improvement / MAX_PUZZLE_DISTANCE
+    return weight * distance_improvement / initial_distance
+
+
+def bounded_progress_reward(
+    initial_distance: int,
+    current_distance: int,
+    *,
+    weight: float = DISTANCE_PROGRESS_WEIGHT,
+) -> float:
+    """Return bounded net progress relative to the initial puzzle distance."""
+
+    if initial_distance < 0:
+        raise ValueError("initial_distance must be non-negative")
+    if initial_distance == 0:
+        return 0.0
+    normalized_progress = (initial_distance - current_distance) / initial_distance
+    bounded_progress = max(-1.0, min(1.0, normalized_progress))
+    return weight * bounded_progress

@@ -140,7 +140,7 @@ def evaluate_episode(
     return EpisodeResult(
         example=example,
         outcome=environment.outcome,
-        reward=episode_reward(steps) if steps else environment.reward,
+        reward=environment.reward,
         moves_taken=environment.moves,
         final_board=final_board,
         steps=steps,
