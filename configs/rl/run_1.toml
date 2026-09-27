@@ -25,6 +25,7 @@ vllm_importance_sampling_correction = true
 learning_rate = 0.000005
 temperature = 1.0
 top_p = 1.0
+thinking = true
 seed = 42
 report_to = "wandb"
 bf16 = true

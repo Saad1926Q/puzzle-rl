@@ -137,6 +137,11 @@ def parse_args() -> argparse.Namespace:
         "--temperature", type=float, default=defaults.get("temperature", 1.0)
     )
     parser.add_argument("--top-p", type=float, default=defaults.get("top_p", 1.0))
+    parser.add_argument(
+        "--thinking",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.get("thinking", True),
+    )
     parser.add_argument("--seed", type=int, default=defaults.get("seed", 42))
     parser.add_argument("--report-to", default=defaults.get("report_to", "none"))
     parser.add_argument(
@@ -246,7 +251,7 @@ def main() -> None:
         data_seed=args.seed,
         bf16=args.bf16,
         gradient_checkpointing=args.gradient_checkpointing,
-        chat_template_kwargs={"enable_thinking": False},
+        chat_template_kwargs={"enable_thinking": args.thinking},
     )
     trainer_kwargs: dict[str, Any] = {
         "model": args.model,
