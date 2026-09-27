@@ -3923,12 +3923,8 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
     { name = "trl" },
-    { name = "wandb" },
-]
-
-[package.optional-dependencies]
-rl = [
     { name = "vllm" },
+    { name = "wandb" },
 ]
 
 [package.dev-dependencies]
@@ -3953,10 +3949,9 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.68.3" },
     { name = "transformers", specifier = "==5.13.0" },
     { name = "trl", git = "https://github.com/huggingface/trl.git?rev=c8ef243357c38f42733a834a5b4740e47c0bba2" },
-    { name = "vllm", marker = "extra == 'rl'", specifier = ">=0.22.0" },
+    { name = "vllm", specifier = ">=0.22.0" },
     { name = "wandb", specifier = ">=0.28.0" },
 ]
-provides-extras = ["rl"]
 
 [package.metadata.requires-dev]
 dev = [
