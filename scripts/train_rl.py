@@ -234,7 +234,7 @@ def main() -> None:
         loss_type="dapo",
         epsilon=0.2,
         epsilon_high=0.28,
-        mask_truncated_completions=True,
+        mask_truncated_completions=False,
         beta=0.0,
         temperature=args.temperature,
         top_p=args.top_p,
