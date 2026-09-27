@@ -77,5 +77,5 @@ SLIDE_TILE_TOOL = {
 }
 
 # Stable labels included in evaluation reports.
-REWARD_SCHEME = "exact_distance_progress_v4_initial_normalized"
+REWARD_SCHEME = "exact_distance_progress_v3"
 ACTION_INTERFACE = "tile_id_v1"

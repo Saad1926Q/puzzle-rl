@@ -27,11 +27,7 @@ def test_legal_move_solves_with_terminal_reward() -> None:
     assert env.board == GOAL
     assert env.done is True
     assert env.reward == solved_reward(1, 1)
-    assert env.progress_reward == distance_progress_reward(
-        ONE_MOVE,
-        GOAL,
-        initial_distance=1,
-    )
+    assert env.progress_reward == distance_progress_reward(ONE_MOVE, GOAL)
 
 
 def test_timeout_keeps_progress_reward() -> None:
@@ -42,18 +38,6 @@ def test_timeout_keeps_progress_reward() -> None:
     assert result.status == "timeout"
     assert env.reward == result.progress_reward
     assert env.done is True
-
-
-def test_timeout_clamps_net_progress_reward() -> None:
-    env = make_env(ONE_MOVE, 1, max_turns=3)
-
-    env._move(5)
-    env._move(2)
-    result = env._move(1)
-
-    assert result.status == "timeout"
-    assert env.progress_reward == pytest.approx(-1.5)
-    assert env.reward == pytest.approx(-0.5)
 
 
 def test_illegal_move_preserves_progress_and_applies_penalty() -> None:
