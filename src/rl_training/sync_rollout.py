@@ -62,15 +62,16 @@ def _sampled_logprobs(values: Any) -> list[float]:
     return result
 
 
-def _looks_truncated(tokenizer: Any, completion_ids: list[int]) -> bool:
-    if not completion_ids:
-        return False
-    terminal_ids = {
-        token_id
-        for token_id in (tokenizer.eos_token_id, tokenizer.pad_token_id)
-        if token_id is not None
-    }
-    return completion_ids[-1] not in terminal_ids
+def _hit_token_limit(
+    completion_ids: list[int],
+    max_completion_length: int,
+) -> bool:
+    """Return whether generation consumed the configured token budget."""
+
+    return (
+        max_completion_length > 0
+        and len(completion_ids) >= max_completion_length
+    )
 
 
 def _tool_tile(message: Any) -> int | None:
@@ -174,8 +175,9 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
 
         tile = _tool_tile(assistant_message)
         if tile is None:
-            episode.truncated = _looks_truncated(
-                trainer.processing_class, completion_ids_for_turn
+            episode.truncated = _hit_token_limit(
+                completion_ids_for_turn,
+                trainer.max_completion_length,
             )
             episode.environment._fail(
                 "truncated" if episode.truncated else "malformed"

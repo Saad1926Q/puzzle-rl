@@ -67,6 +67,7 @@ def fake_trainer(monkeypatch) -> SimpleNamespace:
         use_vllm=True,
         state=SimpleNamespace(global_step=0),
         _last_loaded_step=-1,
+        max_completion_length=4,
         vllm_generation=FakeVLLM(),
     )
 
@@ -88,6 +89,99 @@ def test_sync_rollout_rebuilds_bounded_history(fake_trainer) -> None:
     assert len(fake_trainer.processing_class.messages[2]) == 4
     assert episodes[0].turns[0].logprobs == [-0.25]
     assert episodes[0].turns[1].prompt_ids != episodes[0].turns[0].prompt_ids
+
+
+@pytest.mark.parametrize(
+    ("completion_length", "limit", "expected"),
+    [(0, 4, False), (3, 4, False), (4, 4, True), (5, 4, True)],
+)
+def test_hit_token_limit_uses_completion_length(
+    completion_length: int,
+    limit: int,
+    expected: bool,
+) -> None:
+    assert sync_rollout._hit_token_limit(
+        [1] * completion_length,
+        limit,
+    ) is expected
+
+
+@pytest.mark.parametrize(
+    ("completion_ids", "expected_outcome"),
+    [([1, 2, 3], "malformed"), ([1, 2, 3, 4], "truncated")],
+)
+def test_failed_tool_call_is_classified_by_token_limit(
+    fake_trainer,
+    monkeypatch,
+    completion_ids: list[int],
+    expected_outcome: str,
+) -> None:
+    def generate(*, prompts, images, num_generations):
+        assert images is None
+        assert num_generations == 1
+        return (
+            prompts,
+            [completion_ids for _ in prompts],
+            [[[-0.25]] * len(completion_ids) for _ in prompts],
+            None,
+        )
+
+    monkeypatch.setattr(
+        fake_trainer.vllm_generation,
+        "generate",
+        generate,
+    )
+    monkeypatch.setattr(sync_rollout, "parse_response", lambda *_args, **_kwargs: {})
+
+    [episode] = sync_rollout.generate_episode_group(
+        fake_trainer,
+        [
+            {
+                "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+                "optimal_length": 1,
+                "max_turns": 1,
+            }
+        ],
+    )
+
+    assert episode.outcome == expected_outcome
+    assert episode.truncated is (expected_outcome == "truncated")
+
+
+def test_valid_tool_call_at_token_limit_is_not_truncated(
+    fake_trainer,
+    monkeypatch,
+) -> None:
+    def generate(*, prompts, images, num_generations):
+        assert images is None
+        assert num_generations == 1
+        completion_ids = [8, 2, 3, 4]
+        return (
+            prompts,
+            [completion_ids for _ in prompts],
+            [[[-0.25]] * len(completion_ids) for _ in prompts],
+            None,
+        )
+
+    monkeypatch.setattr(
+        fake_trainer.vllm_generation,
+        "generate",
+        generate,
+    )
+
+    [episode] = sync_rollout.generate_episode_group(
+        fake_trainer,
+        [
+            {
+                "board": [1, 2, 3, 4, 5, 6, 7, 0, 8],
+                "optimal_length": 1,
+                "max_turns": 1,
+            }
+        ],
+    )
+
+    assert episode.outcome == "solved"
+    assert episode.truncated is False
 
 
 def test_tool_tile_rejects_wrong_tool_and_arguments() -> None:

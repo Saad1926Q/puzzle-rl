@@ -209,6 +209,13 @@ class PuzzleGRPOTrainer(GRPOTrainer):
         self._metrics[mode]["rollout/truncated_rate"].append(
             sum(episode.truncated for episode in episodes) / len(episodes)
         )
+        self._metrics[mode]["rollout/malformed_rate"].append(
+            sum(episode.outcome == "malformed" for episode in episodes)
+            / len(episodes)
+        )
+        self._metrics[mode]["rollout/illegal_rate"].append(
+            sum(episode.outcome == "illegal" for episode in episodes) / len(episodes)
+        )
         self._metrics[mode]["rollout/solved_rate"].append(
             sum(episode.outcome == "solved" for episode in episodes) / len(episodes)
         )
