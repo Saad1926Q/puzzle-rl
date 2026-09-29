@@ -237,7 +237,7 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
                 flush=True,
             )
         if isinstance(assistant_message, dict):
-            reasoning = assistant_message.get("content") or ""
+            reasoning = assistant_message.get("reasoning_content") or ""
             reasoning_details = assistant_message.get("reasoning_details")
         else:
             reasoning = ""

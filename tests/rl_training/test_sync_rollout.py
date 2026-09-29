@@ -49,7 +49,8 @@ def fake_trainer(monkeypatch) -> SimpleNamespace:
     def fake_parse_response(_tokenizer, completion_ids, *, prefix):
         assert prefix
         return {
-            "content": "move",
+            "content": "",
+            "reasoning_content": "move",
             "tool_calls": [
                 {
                     "function": {
