@@ -20,6 +20,7 @@ from puzzle3.environment import (
 )
 from puzzle3.solver import exact_distance
 from rl_training.grpo_trainer import PuzzleGRPOTrainer
+from rl_training.trajectory import RLTrajectoryWriter
 
 QWEN35_LORA_TARGET_MODULES = [
     "q_proj",
@@ -69,6 +70,19 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=Path(defaults.get("output_dir", "outputs/rl")),
+    )
+    parser.add_argument(
+        "--save-trajectories",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.get("save_trajectories", False),
+        help="Append human-readable rollout groups to a JSONL file",
+    )
+    trajectory_default = defaults.get("trajectory_output")
+    parser.add_argument(
+        "--trajectory-output",
+        type=Path,
+        default=Path(trajectory_default) if trajectory_default else None,
+        help="Trajectory JSONL path; defaults to <output-dir>/trajectories.jsonl",
     )
     parser.add_argument(
         "--vllm-server-url",
@@ -271,10 +285,25 @@ def main() -> None:
             use_rslora=False,
             target_modules=QWEN35_LORA_TARGET_MODULES,
         )
-    trainer = PuzzleGRPOTrainer(**trainer_kwargs)
-    trainer.train()
-    trainer.save_model(str(args.output_dir / "final"))
-    tokenizer.save_pretrained(str(args.output_dir / "final"))
+
+    trajectory_writer: RLTrajectoryWriter | None = None
+    trajectory_path: Path | None = None
+    if args.save_trajectories:
+        trajectory_path = args.trajectory_output or args.output_dir / "trajectories.jsonl"
+        trajectory_writer = RLTrajectoryWriter(trajectory_path)
+        trainer_kwargs["trajectory_callback"] = trajectory_writer.write_group
+
+    try:
+        trainer = PuzzleGRPOTrainer(**trainer_kwargs)
+        trainer.train()
+        trainer.save_model(str(args.output_dir / "final"))
+        tokenizer.save_pretrained(str(args.output_dir / "final"))
+    finally:
+        if trajectory_writer is not None:
+            trajectory_writer.close()
+
+    if trajectory_path is not None:
+        print(f"Saved RL trajectories to {trajectory_path}")
 
 
 

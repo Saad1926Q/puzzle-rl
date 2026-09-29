@@ -88,7 +88,15 @@ def test_sync_rollout_rebuilds_bounded_history(fake_trainer) -> None:
     assert len(fake_trainer.processing_class.messages[0]) == 2
     assert len(fake_trainer.processing_class.messages[2]) == 4
     assert episodes[0].turns[0].logprobs == [-0.25]
-    assert episodes[0].turns[1].prompt_ids != episodes[0].turns[0].prompt_ids
+    assert episodes[0].turns[0].board == (1, 2, 3, 4, 5, 6, 0, 7, 8)
+    assert episodes[0].turns[0].legal_tiles == (4, 7)
+    assert episodes[0].turns[0].reasoning == "move"
+    assert episodes[0].turns[0].move == 7
+    assert episodes[0].turns[0].status == "valid"
+    assert episodes[0].turns[1].move == 8
+    assert episodes[0].turns[1].status == "solved"
+    assert episodes[0].turns[1].next_board == (1, 2, 3, 4, 5, 6, 7, 8, 0)
+    assert episodes[0].turns[0].prompt_ids != episodes[0].turns[1].prompt_ids
 
 
 @pytest.mark.parametrize(

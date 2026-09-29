@@ -2,23 +2,40 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import torch
+
 from trl import GRPOTrainer
 from trl.trainer.utils import nanstd, pad, split_tensor_dict
 
 from rl_training.sync_rollout import EpisodeRollout, TurnRecord, generate_episode_group
 
 
+TrajectoryCallback = Callable[
+    [int, int, list[EpisodeRollout], list[float]],
+    None,
+]
+
+
 class PuzzleGRPOTrainer(GRPOTrainer):
     """Feed exact per-turn puzzle contexts into TRL's standard GRPO loss."""
 
-    def __init__(self, *args: Any, history_turns: int, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        history_turns: int,
+        trajectory_callback: TrajectoryCallback | None = None,
+        **kwargs: Any,
+    ) -> None:
         if history_turns < 0:
             raise ValueError("history_turns must be non-negative")
         self.history_turns = history_turns
+        self.trajectory_callback = trajectory_callback
+        self._trajectory_group = 0
         super().__init__(*args, **kwargs)
+
 
     def _episode_advantages(
         self, episodes: list[EpisodeRollout], device: torch.device
@@ -230,14 +247,21 @@ class PuzzleGRPOTrainer(GRPOTrainer):
             )
         mode = "train" if self.model.training else "eval"
         all_rows: list[tuple[TurnRecord, float, bool]] = []
-        all_episodes: list[EpisodeRollout] = []
         for start in range(0, len(inputs), self.num_generations):
             episodes = generate_episode_group(
                 self,
                 [dict(row) for row in inputs[start : start + self.num_generations]],
             )
             advantages = self._episode_advantages(episodes, self.accelerator.device)
-            all_episodes.extend(episodes)
+            if mode == "train":
+                if self.trajectory_callback is not None:
+                    self.trajectory_callback(
+                        self.state.global_step,
+                        self._trajectory_group,
+                        episodes,
+                        [float(value.item()) for value in advantages],
+                    )
+                self._trajectory_group += 1
             all_rows.extend(self._rows_from_episodes(episodes, advantages))
             self._log_rollout_metrics(episodes, advantages, mode)
 

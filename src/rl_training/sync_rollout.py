@@ -20,6 +20,30 @@ class TurnRecord:
     prompt_ids: list[int]
     completion_ids: list[int]
     logprobs: list[float]
+    board: tuple[int, ...] = ()
+    legal_tiles: tuple[int, ...] = ()
+    reasoning: str = ""
+    reasoning_details: Any = None
+    move: int | None = None
+    next_board: tuple[int, ...] | None = None
+    status: str = "unknown"
+    progress_reward: float = 0.0
+    terminal_reward: float = 0.0
+    reward: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "board": list(self.board),
+            "legal_tiles": list(self.legal_tiles),
+            "reasoning": self.reasoning,
+            "reasoning_details": self.reasoning_details,
+            "move": self.move,
+            "next_board": list(self.next_board) if self.next_board is not None else None,
+            "status": self.status,
+            "progress_reward": self.progress_reward,
+            "terminal_reward": self.terminal_reward,
+            "reward": self.reward,
+        }
 
 
 @dataclass(slots=True)
@@ -40,6 +64,28 @@ class EpisodeRollout:
     @property
     def outcome(self) -> str:
         return self.environment.outcome
+
+    def to_dict(self, *, advantage: float | None = None) -> dict[str, Any]:
+        board = self.environment.initial_board
+        if board is None:
+            raise RuntimeError("episode environment has not been reset")
+        result: dict[str, Any] = {
+            "initial_board": list(board),
+            "optimal_length": self.environment.optimal_length,
+            "max_turns": self.environment.max_turns,
+            "outcome": self.outcome,
+            "reward": self.reward,
+            "truncated": self.truncated,
+            "tool_calls": self.tool_calls,
+            "tool_failures": self.tool_failures,
+            "turns": [
+                {"turn": index, **turn.to_dict()}
+                for index, turn in enumerate(self.turns, start=1)
+            ],
+        }
+        if advantage is not None:
+            result["advantage"] = advantage
+        return result
 
 
 def _token_ids(value: Any) -> list[int]:
@@ -154,13 +200,6 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
         active, prompt_ids, completion_ids, logprobs, strict=True
     ):
         completion_ids_for_turn = _token_ids(completion)
-        episode.turns.append(
-            TurnRecord(
-                prompt_ids=prompt,
-                completion_ids=completion_ids_for_turn,
-                logprobs=_sampled_logprobs(turn_logprobs),
-            )
-        )
         try:
             assistant_message = parse_response(
                 trainer.processing_class,
@@ -173,33 +212,57 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
         except (TypeError, ValueError, KeyError, json.JSONDecodeError):
             assistant_message = {}
 
+        if isinstance(assistant_message, dict):
+            reasoning = assistant_message.get("content") or ""
+            reasoning_details = assistant_message.get("reasoning_details")
+        else:
+            reasoning = ""
+            reasoning_details = None
+        if not isinstance(reasoning, str):
+            reasoning = ""
+
         tile = _tool_tile(assistant_message)
         if tile is None:
             episode.truncated = _hit_token_limit(
                 completion_ids_for_turn,
                 trainer.max_completion_length,
             )
-            episode.environment._fail(
+            move = episode.environment._fail(
                 "truncated" if episode.truncated else "malformed"
             )
             episode.tool_failures += 1
-            continue
-
-        episode.tool_calls += 1
-        move = episode.environment._move(tile)
-        if move.status == "illegal":
-            episode.tool_failures += 1
-            continue
-
-        if move.status in {"valid", "solved", "timeout"}:
-            episode.history.append(
-                HistoryTurn(
-                    board=move.board,
-                    tile=tile,
-                    reasoning=assistant_message.get("content") or "",
-                    reasoning_details=assistant_message.get("reasoning_details"),
+        else:
+            episode.tool_calls += 1
+            move = episode.environment._move(tile)
+            if move.status == "illegal":
+                episode.tool_failures += 1
+            elif move.status in {"valid", "solved", "timeout"}:
+                episode.history.append(
+                    HistoryTurn(
+                        board=move.board,
+                        tile=tile,
+                        reasoning=reasoning,
+                        reasoning_details=reasoning_details,
+                    )
                 )
+
+        episode.turns.append(
+            TurnRecord(
+                prompt_ids=prompt,
+                completion_ids=completion_ids_for_turn,
+                logprobs=_sampled_logprobs(turn_logprobs),
+                board=move.board,
+                legal_tiles=move.legal_tiles,
+                reasoning=reasoning,
+                reasoning_details=reasoning_details,
+                move=tile,
+                next_board=move.next_board,
+                status=move.status,
+                progress_reward=move.progress_reward,
+                terminal_reward=move.terminal_reward,
+                reward=move.reward,
             )
+        )
 
 
 def generate_episode_group(

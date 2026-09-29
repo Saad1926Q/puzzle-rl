@@ -269,6 +269,20 @@ vLLM importance-sampling correction, LoRA, and W&B reporting. The environment
 reward preserves progress made before malformed, illegal, timeout, or
 truncated terminal failures.
 
+To save human-readable RL rollouts while training, enable trajectory logging:
+
+```bash
+uv run python scripts/train_rl.py \
+    --config configs/rl/run_1.toml \
+    --save-trajectories
+```
+
+This writes `outputs/rl/run-1-balanced/trajectories.jsonl` by default. Each
+JSONL record contains one GRPO generation group, all attempts in that group,
+their rewards and advantages, and each attempt's board, legal moves, reasoning,
+selected move, next board, and status. The record is flushed after each
+completed group, so stopping training preserves all completed groups.
+
 ## Metrics and Trajectories
 
 Evaluation reports:
