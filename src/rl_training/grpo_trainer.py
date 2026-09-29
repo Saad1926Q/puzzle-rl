@@ -36,7 +36,6 @@ class PuzzleGRPOTrainer(GRPOTrainer):
         self._trajectory_group = 0
         super().__init__(*args, **kwargs)
 
-
     def _episode_advantages(
         self, episodes: list[EpisodeRollout], device: torch.device
     ) -> torch.Tensor:
@@ -79,7 +78,7 @@ class PuzzleGRPOTrainer(GRPOTrainer):
         pad_id = self._tokenizer.pad_token_id
         if pad_id is None:
             raise ValueError("tokenizer must define pad_token_id")
-        dummy = TurnRecord([pad_id], [pad_id], [0.0])
+        dummy = TurnRecord([pad_id], [], [])
         rows.extend((dummy, 0.0, False) for _ in range(pad_count))
         return rows
 
@@ -98,6 +97,7 @@ class PuzzleGRPOTrainer(GRPOTrainer):
         prompt_masks_list: list[torch.Tensor] = []
         completion_ids_list: list[torch.Tensor] = []
         completion_masks_list: list[torch.Tensor] = []
+        generated_masks_list: list[torch.Tensor] = []
         sampling_logprobs_list: list[torch.Tensor] = []
         advantages: list[float] = []
 
@@ -106,12 +106,19 @@ class PuzzleGRPOTrainer(GRPOTrainer):
             completion_ids = turn.completion_ids or [pad_id]
             completion_logprobs = turn.logprobs or [0.0]
             if len(completion_logprobs) != len(completion_ids):
-                raise ValueError("generation logprobs must align with completion token IDs")
+                raise ValueError(
+                    "generation logprobs must align with completion token IDs"
+                )
             prompt_ids_list.append(torch.tensor(prompt_ids, dtype=torch.long))
-            prompt_masks_list.append(
-                torch.ones(len(prompt_ids), dtype=torch.long)
-            )
+            prompt_masks_list.append(torch.ones(len(prompt_ids), dtype=torch.long))
             completion_ids_list.append(torch.tensor(completion_ids, dtype=torch.long))
+            generated_masks_list.append(
+                torch.full(
+                    (len(completion_ids),),
+                    1 if turn.completion_ids else 0,
+                    dtype=torch.long,
+                )
+            )
             completion_masks_list.append(
                 torch.full(
                     (len(completion_ids),),
@@ -142,6 +149,12 @@ class PuzzleGRPOTrainer(GRPOTrainer):
             padding_side="right",
             pad_to_multiple_of=self.pad_to_multiple_of,
         ).to(device)
+        generated_token_mask = pad(
+            generated_masks_list,
+            padding_value=0,
+            padding_side="right",
+            pad_to_multiple_of=self.pad_to_multiple_of,
+        ).to(device)
         completion_mask = pad(
             completion_masks_list,
             padding_value=0,
@@ -156,7 +169,7 @@ class PuzzleGRPOTrainer(GRPOTrainer):
         ).to(device)
 
         prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
+        attention_mask = torch.cat([prompt_mask, generated_token_mask], dim=1)
         logits_to_keep = completion_ids.size(1)
         with torch.no_grad():
             old_logprobs, _, _ = self._get_per_token_logps_and_entropies(
@@ -172,13 +185,22 @@ class PuzzleGRPOTrainer(GRPOTrainer):
             "prompt_mask": prompt_mask,
             "completion_ids": completion_ids,
             "completion_mask": completion_mask,
+            "generated_token_mask": generated_token_mask,
             "advantages": torch.tensor(advantages, dtype=torch.float32, device=device),
             "old_per_token_logps": old_logprobs.detach(),
             "num_items_in_batch": self.accelerator.gather(completion_mask.sum()).sum(),
         }
 
+        if self.use_vllm:
+            self._log_train_inference_metrics(
+                old_logprobs,
+                sampling_logprobs,
+                generated_token_mask,
+                mode,
+            )
+
         if self.use_vllm and self.vllm_importance_sampling_correction:
-            difference = (old_logprobs - sampling_logprobs) * completion_mask
+            difference = (old_logprobs - sampling_logprobs) * generated_token_mask
             difference = torch.nan_to_num(difference, nan=0.0)
             mode_name = self.vllm_importance_sampling_mode
             if mode_name in {"sequence_mask", "sequence_truncate"}:
@@ -210,6 +232,50 @@ class PuzzleGRPOTrainer(GRPOTrainer):
 
         return output
 
+    def _log_train_inference_metrics(
+        self,
+        training_logprobs: torch.Tensor,
+        sampling_logprobs: torch.Tensor,
+        generated_token_mask: torch.Tensor,
+        mode: str,
+    ) -> None:
+        valid = (
+            generated_token_mask.bool()
+            & torch.isfinite(training_logprobs)
+            & torch.isfinite(sampling_logprobs)
+        )
+        if not valid.any():
+            return
+
+        sampled_kl = (sampling_logprobs[valid] - training_logprobs[valid]).float()
+        log_ratio = -sampled_kl
+        ratio = torch.exp(log_ratio.clamp(min=-80.0, max=80.0))
+
+        metrics = self._metrics[mode]
+        metrics["train_inference/kl_mean"].append(float(sampled_kl.mean()))
+        metrics["train_inference/kl_median"].append(float(sampled_kl.median()))
+        metrics["train_inference/kl_p95"].append(
+            float(torch.quantile(sampled_kl, 0.95))
+        )
+        metrics["train_inference/kl_max"].append(float(sampled_kl.max()))
+        metrics["train_inference/abs_log_ratio_mean"].append(
+            float(log_ratio.abs().mean())
+        )
+        metrics["train_inference/ratio_p05"].append(float(torch.quantile(ratio, 0.05)))
+        metrics["train_inference/ratio_median"].append(float(ratio.median()))
+        metrics["train_inference/ratio_p95"].append(float(torch.quantile(ratio, 0.95)))
+
+        minimum = self.vllm_importance_sampling_clip_min
+        maximum = self.vllm_importance_sampling_clip_max
+        outside = torch.zeros_like(ratio, dtype=torch.bool)
+        if minimum is not None:
+            outside |= ratio < minimum
+        if maximum is not None:
+            outside |= ratio > maximum
+        metrics["train_inference/ratio_outside_clip_fraction"].append(
+            float(outside.float().mean())
+        )
+
     def _log_rollout_metrics(
         self, episodes: list[EpisodeRollout], advantages: torch.Tensor, mode: str
     ) -> None:
@@ -227,8 +293,7 @@ class PuzzleGRPOTrainer(GRPOTrainer):
             sum(episode.truncated for episode in episodes) / len(episodes)
         )
         self._metrics[mode]["rollout/malformed_rate"].append(
-            sum(episode.outcome == "malformed" for episode in episodes)
-            / len(episodes)
+            sum(episode.outcome == "malformed" for episode in episodes) / len(episodes)
         )
         self._metrics[mode]["rollout/illegal_rate"].append(
             sum(episode.outcome == "illegal" for episode in episodes) / len(episodes)

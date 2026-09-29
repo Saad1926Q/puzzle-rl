@@ -19,6 +19,11 @@ class FakeTokenizer:
         self.messages.append(messages)
         return list(range(10 + len(messages)))
 
+    @staticmethod
+    def decode(token_ids, *, skip_special_tokens):
+        assert skip_special_tokens is False
+        return "raw:" + ",".join(str(token) for token in token_ids)
+
 
 class FakeVLLM:
     def __init__(self) -> None:
@@ -45,7 +50,8 @@ def fake_trainer(monkeypatch) -> SimpleNamespace:
         assert prefix
         return {
             "role": "assistant",
-            "content": "move",
+            "content": "",
+            "reasoning_content": "move",
             "tool_calls": [
                 {
                     "function": {
@@ -91,6 +97,12 @@ def test_sync_rollout_rebuilds_bounded_history(fake_trainer) -> None:
     assert episodes[0].turns[0].board == (1, 2, 3, 4, 5, 6, 0, 7, 8)
     assert episodes[0].turns[0].legal_tiles == (4, 7)
     assert episodes[0].turns[0].reasoning == "move"
+    assert episodes[0].turns[0].raw_response == "raw:7"
+    assert episodes[0].turns[0].parsed_response["reasoning_content"] == "move"
+    assert episodes[0].turns[0].parse_error is None
+    assert episodes[0].turns[0].tool_error is None
+    assert episodes[0].turns[0].completion_tokens == 1
+    assert episodes[0].turns[0].hit_token_limit is False
     assert episodes[0].turns[0].move == 7
     assert episodes[0].turns[0].status == "valid"
     assert episodes[0].turns[1].move == 8
@@ -108,10 +120,13 @@ def test_hit_token_limit_uses_completion_length(
     limit: int,
     expected: bool,
 ) -> None:
-    assert sync_rollout._hit_token_limit(
-        [1] * completion_length,
-        limit,
-    ) is expected
+    assert (
+        sync_rollout._hit_token_limit(
+            [1] * completion_length,
+            limit,
+        )
+        is expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -154,6 +169,13 @@ def test_failed_tool_call_is_classified_by_token_limit(
 
     assert episode.outcome == expected_outcome
     assert episode.truncated is (expected_outcome == "truncated")
+    assert episode.turns[0].raw_response == "raw:" + ",".join(
+        str(token) for token in completion_ids
+    )
+    assert episode.turns[0].parsed_response == {}
+    assert episode.turns[0].tool_error == "missing_tool_calls"
+    assert episode.turns[0].completion_tokens == len(completion_ids)
+    assert episode.turns[0].hit_token_limit is (expected_outcome == "truncated")
 
 
 def test_valid_tool_call_at_token_limit_is_not_truncated(
@@ -196,11 +218,7 @@ def test_tool_tile_rejects_wrong_tool_and_arguments() -> None:
     assert sync_rollout._tool_tile({"tool_calls": []}) is None
     assert (
         sync_rollout._tool_tile(
-            {
-                "tool_calls": [
-                    {"function": {"name": "other", "arguments": {"tile": 1}}}
-                ]
-            }
+            {"tool_calls": [{"function": {"name": "other", "arguments": {"tile": 1}}}]}
         )
         is None
     )
@@ -214,3 +232,13 @@ def test_tool_tile_rejects_wrong_tool_and_arguments() -> None:
         )
         is None
     )
+
+
+def test_reasoning_text_prefers_dedicated_reasoning_fields() -> None:
+    assert (
+        sync_rollout._reasoning_text(
+            {"content": "final", "reasoning_content": "reasoning"}
+        )
+        == "reasoning"
+    )
+    assert sync_rollout._reasoning_text({"thinking": "thought"}) == "thought"
