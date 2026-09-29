@@ -279,11 +279,9 @@ uv run python scripts/train_rl.py \
 
 This writes `outputs/rl/run-1-balanced/trajectories.jsonl` by default. Each
 JSONL record contains one GRPO generation group, all attempts in that group,
-their rewards and advantages, and each attempt's raw decoded response, parsed
-response, extracted reasoning, parser/tool error, completion length, token-limit
-status, board, legal moves, selected move, next board, and status. The record is
-flushed after each completed group, so stopping training preserves all
-completed groups.
+their rewards and advantages, and each attempt's board, legal moves, reasoning,
+selected move, next board, and status. The record is flushed after each
+completed group, so stopping training preserves all completed groups.
 
 W&B also receives sampled training-inference KL and importance-ratio
 percentiles computed from vLLM's sampled-token log probabilities and the

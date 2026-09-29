@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from math import nan
 from typing import Any
@@ -20,12 +21,6 @@ class TurnRecord:
     prompt_ids: list[int]
     completion_ids: list[int]
     logprobs: list[float]
-    raw_response: str = ""
-    parsed_response: dict[str, Any] = field(default_factory=dict)
-    parse_error: str | None = None
-    tool_error: str | None = None
-    completion_tokens: int = 0
-    hit_token_limit: bool = False
     board: tuple[int, ...] = ()
     legal_tiles: tuple[int, ...] = ()
     reasoning: str = ""
@@ -41,12 +36,6 @@ class TurnRecord:
         return {
             "board": list(self.board),
             "legal_tiles": list(self.legal_tiles),
-            "raw_response": self.raw_response,
-            "parsed_response": self.parsed_response,
-            "parse_error": self.parse_error,
-            "tool_error": self.tool_error,
-            "completion_tokens": self.completion_tokens,
-            "hit_token_limit": self.hit_token_limit,
             "reasoning": self.reasoning,
             "reasoning_details": self.reasoning_details,
             "move": self.move,
@@ -129,53 +118,6 @@ def _hit_token_limit(
     """Return whether generation consumed the configured token budget."""
 
     return max_completion_length > 0 and len(completion_ids) >= max_completion_length
-
-
-def _reasoning_text(message: Any) -> str:
-    if not isinstance(message, dict):
-        return ""
-    for field_name in (
-        "reasoning_content",
-        "reasoning",
-        "thinking",
-        "analysis",
-        "content",
-    ):
-        value = message.get(field_name)
-        if isinstance(value, str) and value:
-            return value
-    return ""
-
-
-def _tool_error(message: Any) -> str | None:
-    if not isinstance(message, dict):
-        return "response_not_object"
-    tool_calls = message.get("tool_calls")
-    if tool_calls is None:
-        return "missing_tool_calls"
-    if not isinstance(tool_calls, list):
-        return "tool_calls_not_list"
-    if len(tool_calls) != 1:
-        return f"expected_one_tool_call_got_{len(tool_calls)}"
-    tool_call = tool_calls[0]
-    if not isinstance(tool_call, dict):
-        return "tool_call_not_object"
-    function = tool_call.get("function")
-    if not isinstance(function, dict):
-        return "function_not_object"
-    if function.get("name") != "slide_tile":
-        return "wrong_tool_name"
-    arguments = function.get("arguments")
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            return "arguments_invalid_json"
-    if not isinstance(arguments, dict):
-        return "arguments_not_object"
-    if type(arguments.get("tile")) is not int:
-        return "tile_not_integer"
-    return None
 
 
 def _tool_tile(message: Any) -> int | None:
@@ -263,28 +205,46 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
         active, prompt_ids, completion_ids, logprobs, strict=True
     ):
         completion_ids_for_turn = _token_ids(completion)
-        raw_response = trainer.processing_class.decode(
-            completion_ids_for_turn,
-            skip_special_tokens=False,
+        debug_responses = os.environ.get("PUZZLE_RL_DEBUG_RESPONSES") == "1"
+        raw_response = (
+            trainer.processing_class.decode(
+                completion_ids_for_turn,
+                skip_special_tokens=False,
+            )
+            if debug_responses
+            else ""
         )
-        parse_error = None
+        if debug_responses:
+            print("[rl-debug] raw_response:", repr(raw_response), flush=True)
         try:
-            parsed_response = parse_response(
+            assistant_message = parse_response(
                 trainer.processing_class,
                 completion_ids_for_turn,
                 prefix=prompt,
             )
-            parsed_response = normalize_tool_arguments(
-                {"completion": [parsed_response]}
+            assistant_message = normalize_tool_arguments(
+                {"completion": [assistant_message]}
             )["completion"][0]
         except (TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
-            parsed_response = {}
-            parse_error = f"{type(error).__name__}: {error}"
+            if debug_responses:
+                print("[rl-debug] parse_error:", repr(error), flush=True)
+            assistant_message = {}
 
-        assistant_message = parsed_response if isinstance(parsed_response, dict) else {}
-        reasoning = _reasoning_text(assistant_message)
-        reasoning_details = assistant_message.get("reasoning_details")
-        tool_error = _tool_error(assistant_message)
+        if debug_responses:
+            print(
+                "[rl-debug] parsed_response:",
+                repr(assistant_message),
+                flush=True,
+            )
+        if isinstance(assistant_message, dict):
+            reasoning = assistant_message.get("content") or ""
+            reasoning_details = assistant_message.get("reasoning_details")
+        else:
+            reasoning = ""
+            reasoning_details = None
+        if not isinstance(reasoning, str):
+            reasoning = ""
+
         tile = _tool_tile(assistant_message)
         if tile is None:
             episode.truncated = _hit_token_limit(
@@ -315,15 +275,6 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
                 prompt_ids=prompt,
                 completion_ids=completion_ids_for_turn,
                 logprobs=_sampled_logprobs(turn_logprobs),
-                raw_response=raw_response,
-                parsed_response=assistant_message,
-                parse_error=parse_error,
-                tool_error=tool_error,
-                completion_tokens=len(completion_ids_for_turn),
-                hit_token_limit=_hit_token_limit(
-                    completion_ids_for_turn,
-                    trainer.max_completion_length,
-                ),
                 board=move.board,
                 legal_tiles=move.legal_tiles,
                 reasoning=reasoning,
