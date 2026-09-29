@@ -218,10 +218,10 @@ call per generation group. Each generated turn keeps the exact prompt tokens,
 completion tokens, sampled log probabilities, board state, and bounded
 conversation history needed by the optimizer.
 
-Install the RL extra and authenticate W&B:
+Install the project dependencies and authenticate W&B:
 
 ```bash
-uv sync --extra rl
+uv sync
 uv run wandb login
 ```
 
