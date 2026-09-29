@@ -19,7 +19,6 @@ class RLTrajectoryWriter:
 
     def write_group(
         self,
-        *,
         training_step: int,
         group: int,
         episodes: list[EpisodeRollout],
