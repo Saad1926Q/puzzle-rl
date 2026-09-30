@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
+
 from math import nan
 from typing import Any
 
@@ -143,6 +145,60 @@ def _tool_tile(message: Any) -> int | None:
     tile = arguments.get("tile")
     return tile if type(tile) is int else None
 
+_QWEN_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*"
+    r"<function=(?P<name>[^\n>]+)>\s*"
+    r"(?P<body>.*?)"
+    r"</function>\s*</tool_call>",
+    re.DOTALL,
+)
+_QWEN_PARAMETER_RE = re.compile(
+    r"<parameter=(?P<name>[^>\n]+)>\s*"
+    r"(?P<value>.*?)"
+    r"\s*</parameter>",
+    re.DOTALL,
+)
+
+
+def _recover_qwen_tool_call(raw_response: str) -> dict[str, Any] | None:
+    """Recover a Qwen tool call when reasoning has no closing tag."""
+
+    calls = list(_QWEN_TOOL_CALL_RE.finditer(raw_response))
+    if len(calls) != 1:
+        return None
+
+    call = calls[0]
+    if call.group("name").strip() != "slide_tile":
+        return None
+
+    parameters = list(_QWEN_PARAMETER_RE.finditer(call.group("body")))
+    if len(parameters) != 1 or parameters[0].group("name").strip() != "tile":
+        return None
+
+    try:
+        tile = int(parameters[0].group("value").strip())
+    except ValueError:
+        return None
+
+    reasoning = raw_response[: call.start()].strip()
+    if reasoning.startswith("<think>"):
+        reasoning = reasoning[len("<think>") :].lstrip()
+
+    return {
+        "role": "assistant",
+        "reasoning_content": reasoning,
+        "content": "",
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "slide_tile",
+                    "arguments": {"tile": tile},
+                },
+            }
+        ],
+    }
+
 
 def _tool_schema(trainer: Any) -> list[Any]:
     """Return the environment tool schema already validated by GRPOTrainer."""
@@ -229,6 +285,18 @@ def _generate_turns(trainer: Any, episodes: list[EpisodeRollout]) -> None:
             if debug_responses:
                 print("[rl-debug] parse_error:", repr(error), flush=True)
             assistant_message = {}
+
+        if _tool_tile(assistant_message) is None:
+            if not raw_response:
+                raw_response = trainer.processing_class.decode(
+                    completion_ids_for_turn,
+                    skip_special_tokens=False,
+                )
+            recovered_message = _recover_qwen_tool_call(raw_response)
+            if recovered_message is not None:
+                assistant_message = recovered_message
+                if debug_responses:
+                    print("[rl-debug] parser_fallback: qwen_xml", flush=True)
 
         if debug_responses:
             print(

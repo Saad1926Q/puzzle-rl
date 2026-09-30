@@ -241,3 +241,88 @@ def test_tool_tile_rejects_wrong_tool_and_arguments() -> None:
         )
         is None
     )
+
+
+def test_recover_qwen_tool_call_without_think_close() -> None:
+    parsed = sync_rollout._recover_qwen_tool_call(
+        "Reason before action.\n"
+        "<tool_call>\n"
+        "<function=slide_tile>\n"
+        "<parameter=tile>\n"
+        "4\n"
+        "</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+
+    assert parsed is not None
+    assert parsed["reasoning_content"] == "Reason before action."
+    assert sync_rollout._tool_tile(parsed) == 4
+
+
+@pytest.mark.parametrize(
+    "raw_response",
+    [
+        "<tool_call><function=slide_tile><parameter=tile>4</parameter></function>",
+        "<tool_call><function=other><parameter=tile>4</parameter></function></tool_call>",
+        "<tool_call><function=slide_tile><parameter=tile>four</parameter></function></tool_call>",
+        (
+            "<tool_call><function=slide_tile><parameter=tile>4</parameter>"
+            "</function></tool_call>"
+            "<tool_call><function=slide_tile><parameter=tile>5</parameter>"
+            "</function></tool_call>"
+        ),
+    ],
+)
+def test_recover_qwen_tool_call_rejects_invalid_markup(raw_response: str) -> None:
+    assert sync_rollout._recover_qwen_tool_call(raw_response) is None
+
+
+def test_sync_rollout_recovers_qwen_tool_call_without_think_close(
+    fake_trainer,
+    monkeypatch,
+) -> None:
+    raw_response = (
+        "Reason before action.\n"
+        "<tool_call>\n"
+        "<function=slide_tile>\n"
+        "<parameter=tile>\n"
+        "7\n"
+        "</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+
+    monkeypatch.setattr(
+        sync_rollout,
+        "parse_response",
+        lambda *_args, **_kwargs: {
+            "role": "assistant",
+            "reasoning_content": raw_response,
+            "content": "",
+        },
+    )
+
+    def decode(_token_ids, *, skip_special_tokens):
+        assert skip_special_tokens is False
+        return raw_response
+
+    monkeypatch.setattr(fake_trainer.processing_class, "decode", decode)
+
+    [episode] = sync_rollout.generate_episode_group(
+        fake_trainer,
+        [
+            {
+                "board": [1, 2, 3, 4, 5, 6, 0, 7, 8],
+                "optimal_length": 2,
+                "max_turns": 1,
+            }
+        ],
+    )
+
+    assert episode.tool_calls == 1
+    assert episode.tool_failures == 0
+    assert episode.turns[0].move == 7
+    assert episode.turns[0].status == "timeout"
+    assert episode.turns[0].completion_ids == [7]
+    assert episode.turns[0].logprobs == [-0.25]
