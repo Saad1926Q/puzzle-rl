@@ -104,6 +104,15 @@ def parse_args() -> argparse.Namespace:
         default=defaults.get("vllm_gpu_memory_utilization", 0.3),
     )
     parser.add_argument(
+        "--vllm-max-model-length",
+        type=int,
+        default=defaults.get("vllm_max_model_length"),
+        help=(
+            "Maximum context length allocated by vLLM. Must cover the prompt "
+            "plus max-turn-tokens."
+        ),
+    )
+    parser.add_argument(
         "--vllm-enable-sleep-mode",
         action=argparse.BooleanOptionalAction,
         default=defaults.get("vllm_enable_sleep_mode", True),
@@ -209,6 +218,11 @@ def main() -> None:
         raise ValueError("synchronous puzzle training requires --use-vllm")
     if not 0.0 < args.vllm_gpu_memory_utilization < 1.0:
         raise ValueError("--vllm-gpu-memory-utilization must be between 0 and 1")
+    if (
+        args.vllm_max_model_length is not None
+        and args.vllm_max_model_length <= 0
+    ):
+        raise ValueError("--vllm-max-model-length must be positive")
     if args.max_steps == 0:
         raise ValueError("--max-steps must be positive or -1 for epoch-driven training")
     if args.max_steps < 0 and args.num_train_epochs <= 0:
@@ -248,6 +262,7 @@ def main() -> None:
         vllm_mode=args.vllm_mode,
         vllm_server_base_url=args.vllm_server_url,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        vllm_max_model_length=args.vllm_max_model_length,
         vllm_enable_sleep_mode=args.vllm_enable_sleep_mode,
         vllm_importance_sampling_correction=True,
         loss_type="dapo",
