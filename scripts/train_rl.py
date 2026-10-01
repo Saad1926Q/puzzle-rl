@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, load_dataset
-from peft import LoraConfig
+from huggingface_hub import snapshot_download
+from peft import LoraConfig, PeftModel
 from transformers import AutoTokenizer
 from trl import GRPOConfig
+from trl.trainer.utils import create_model_from_path
 
 from puzzle3.environment import (
     DEFAULT_HISTORY_TURNS,
@@ -46,6 +48,56 @@ def read_config(path: Path) -> dict[str, Any]:
         return tomllib.load(file)
 
 
+def _resolve_hf_or_local_directory(source: str, *, label: str) -> Path:
+    if source.startswith("hf://"):
+        repo_id = source.removeprefix("hf://")
+        if not repo_id:
+            raise ValueError(f"{label} HF source must include a repository ID")
+        return Path(snapshot_download(repo_id=repo_id, repo_type="model"))
+
+    path = Path(source).expanduser()
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"{label} directory does not exist: {path}. "
+            "Use a local directory or an hf:// repository ID."
+        )
+    return path
+
+
+def _resolve_resume_checkpoint(source: str) -> Path:
+    checkpoint = _resolve_hf_or_local_directory(
+        source, label="resume checkpoint"
+    )
+    if not (checkpoint / "trainer_state.json").is_file():
+        raise ValueError(
+            f"Resume checkpoint {checkpoint} is missing trainer_state.json. "
+            "An adapter-only directory cannot restore optimizer/trainer state; "
+            "use --lora-adapter for adapter initialization."
+        )
+    return checkpoint
+
+
+def _resolve_lora_adapter(source: str) -> Path:
+    adapter = _resolve_hf_or_local_directory(source, label="LoRA adapter")
+    if not (adapter / "adapter_config.json").is_file():
+        raise ValueError(f"LoRA adapter {adapter} is missing adapter_config.json")
+    if not any(
+        (adapter / filename).is_file()
+        for filename in ("adapter_model.safetensors", "adapter_model.bin")
+    ):
+        raise ValueError(
+            f"LoRA adapter {adapter} is missing adapter_model.safetensors or "
+            "adapter_model.bin"
+        )
+    return adapter
+
+
+def _load_lora_adapter(base_model: str, adapter_source: str) -> PeftModel:
+    adapter = _resolve_lora_adapter(adapter_source)
+    base = create_model_from_path(base_model)
+    return PeftModel.from_pretrained(base, str(adapter), is_trainable=True)
+
+
 def parse_args() -> argparse.Namespace:
     bootstrap = argparse.ArgumentParser(add_help=False)
     bootstrap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -55,6 +107,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=bootstrap_args.config)
     parser.add_argument("--model", default=defaults.get("model", "Qwen/Qwen3.5-4B"))
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        default=defaults.get("resume_from_checkpoint"),
+        help=(
+            "Local Trainer checkpoint or hf:// model repository containing "
+            "trainer state."
+        ),
+    )
+    parser.add_argument(
+        "--lora-adapter",
+        default=defaults.get("lora_adapter"),
+        help=(
+            "Local LoRA adapter directory or hf:// model repository. "
+            "Starts a fresh optimizer state."
+        ),
+    )
     parser.add_argument(
         "--dataset",
         default=defaults.get("dataset", "saad1926q/8-puzzle"),
@@ -223,6 +291,12 @@ def main() -> None:
         and args.vllm_max_model_length <= 0
     ):
         raise ValueError("--vllm-max-model-length must be positive")
+    if args.resume_from_checkpoint and args.lora_adapter:
+        raise ValueError(
+            "--resume-from-checkpoint and --lora-adapter are mutually exclusive"
+        )
+    if args.lora_adapter and not args.use_lora:
+        raise ValueError("--lora-adapter requires --use-lora")
     if args.max_steps == 0:
         raise ValueError("--max-steps must be positive or -1 for epoch-driven training")
     if args.max_steps < 0 and args.num_train_epochs <= 0:
@@ -239,6 +313,15 @@ def main() -> None:
         raise ValueError("--lora-r must be positive")
     if args.use_lora and args.lora_alpha <= 0:
         raise ValueError("--lora-alpha must be positive")
+    resume_checkpoint = (
+        _resolve_resume_checkpoint(args.resume_from_checkpoint)
+        if args.resume_from_checkpoint
+        else None
+    )
+    model: Any = args.model
+    if args.lora_adapter:
+        model = _load_lora_adapter(args.model, args.lora_adapter)
+
 
     dataset = load_training_data(
         args.dataset, args.dataset_subset, args.dataset_split, args.max_turns
@@ -283,14 +366,14 @@ def main() -> None:
         chat_template_kwargs={"enable_thinking": args.thinking},
     )
     trainer_kwargs: dict[str, Any] = {
-        "model": args.model,
+        "model": model,
         "args": training_args,
         "train_dataset": dataset,
         "processing_class": tokenizer,
         "environment_factory": PuzzleEnv,
         "history_turns": args.history_turns,
     }
-    if args.use_lora:
+    if args.use_lora and args.lora_adapter is None:
         trainer_kwargs["peft_config"] = LoraConfig(
             task_type="CAUSAL_LM",
             r=args.lora_r,
@@ -310,7 +393,11 @@ def main() -> None:
 
     try:
         trainer = PuzzleGRPOTrainer(**trainer_kwargs)
-        trainer.train()
+        trainer.train(
+            resume_from_checkpoint=(
+                str(resume_checkpoint) if resume_checkpoint is not None else None
+            )
+        )
         trainer.save_model(str(args.output_dir / "final"))
         tokenizer.save_pretrained(str(args.output_dir / "final"))
     finally:
